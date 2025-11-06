@@ -1,0 +1,25 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.32126.317
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BetrayalHelperRevamped", "BetrayalHelperRevamped.csproj", "{2F35DE9D-0F0D-4C34-AFFE-3BF3AFF488F3}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{2F35DE9D-0F0D-4C34-AFFE-3BF3AFF488F3}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{2F35DE9D-0F0D-4C34-AFFE-3BF3AFF488F3}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{2F35DE9D-0F0D-4C34-AFFE-3BF3AFF488F3}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{2F35DE9D-0F0D-4C34-AFFE-3BF3AFF488F3}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {892B7BA8-3026-4A24-A3DE-3E49F9A37579}
+	EndGlobalSection
+EndGlobal
