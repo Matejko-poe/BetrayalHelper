@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <AssemblyName>BetrayalHelper</AssemblyName>
+    <RootNamespace>BetrayalHelper</RootNamespace>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="ExileCore"><HintPath>..\..\..\ExileCore.dll</HintPath></Reference>
+    <Reference Include="GameOffsets"><HintPath>..\..\..\GameOffsets.dll</HintPath></Reference>
+    <Reference Include="ImGui.NET"><HintPath>..\..\..\ImGui.NET.dll</HintPath></Reference>
+    <Reference Include="Newtonsoft.Json"><HintPath>..\..\..\Newtonsoft.Json.dll</HintPath></Reference>
+    <Reference Include="SharpDX.Mathematics"><HintPath>..\..\..\SharpDX.Mathematics.dll</HintPath></Reference>
+  </ItemGroup>
+</Project>

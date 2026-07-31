@@ -1,0 +1,49 @@
+name: Bug report
+description: Report an incorrect recommendation, parser failure, or crash
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Remove account names, tokens, private memory dumps, and unrelated logs before submitting.
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: Path of Exile version, ExileCore version/commit, and BetrayalHelper commit.
+    validations:
+      required: true
+  - type: textarea
+    id: event
+    attributes:
+      label: Event data
+      description: Include Action.Id, complete English event text, involved members, divisions, ranks, and leaders.
+    validations:
+      required: true
+  - type: textarea
+    id: configuration
+    attributes:
+      label: Strategy configuration
+      description: Farm/Filler, Run/Skip, Atlas passive toggles, and Unbreaking scarab count.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected and actual result
+      description: Which button should have been selected and which button was highlighted?
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Debug logs and screenshot
+      description: Paste relevant DebugMode lines and drag in a board/choice screenshot if available.
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy check
+      options:
+        - label: I removed tokens, account details, and unrelated private data.
+          required: true
