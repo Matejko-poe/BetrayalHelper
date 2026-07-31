@@ -49,6 +49,14 @@ namespace BetrayalHelper
         // interrogated member does not lose rank. The map-device limit is 2.
         public RangeNode<int> UnbreakingScarabs { get; set; } = new RangeNode<int>(2, 0, 2);
 
+        // Persisted geometry of the single safehouse planner window. These are
+        // plain values so they are saved with the rest of the plugin settings
+        // without adding technical controls to the settings UI.
+        public int SafehouseWindowX { get; set; } = 800;
+        public int SafehouseWindowY { get; set; } = 500;
+        public int SafehouseWindowWidth { get; set; } = 720;
+        public int SafehouseWindowHeight { get; set; } = 360;
+
         /// <summary>
         /// Overall farming strategy. Affects which safehouses to run and scoring logic.
         /// </summary>

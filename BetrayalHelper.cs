@@ -65,6 +65,52 @@ namespace BetrayalHelper
         RectangleF _InterrogateButton = new RectangleF();
         BetrayalMaster _eventMaster = new BetrayalMaster();
         List<BetrayalMaster> _eventMasters = new List<BetrayalMaster>();
+        List<Outcome> _lastOutcomes = new List<Outcome>();
+        ActionType? _lastRecommendedAction;
+        int _lastRecommendedScore;
+        bool? _lastInterrogationQueueFull;
+        string _lastInterrogationCounterText = "not checked";
+        string _interrogationQueueEventKey = "";
+        bool _cachedInterrogationQueueFull;
+        string _faqSearch = "";
+
+        private static readonly (string Category, string Question, string Answer)[] FaqEntries =
+        {
+            ("Overview", "What does BetrayalHelper do?", "It reads the visible Immortal Syndicate board and encounter choice, scores Special, Interrogate and Release, then highlights the highest-scoring button. It never clicks for you."),
+            ("Overview", "What is the main strategy?", "Safehouse Rewards uses a 5-5-2-2 board: two compact Farm divisions with two desired members and two Filler divisions with five members."),
+            ("Configuration", "What is the difference between Farm/Filler and Run/Skip?", "Farm/Filler describes desired member placement. Run/Skip independently describes whether intelligence and completion of that safehouse are desirable."),
+            ("Configuration", "Why is the first member marked [L]?", "The first configured member is the preferred leader. Use the arrow buttons to change leader priority."),
+            ("Configuration", "Is two the division capacity?", "No. Five is the game limit. Two is the strategic target for a compact Farm division."),
+            ("Relationships", "Is every Rival line good?", "No. Rival between Farm and Filler is valuable. Farm-Farm and Filler-Filler links can waste reinforcement opportunities and are normally penalized."),
+            ("Relationships", "Is Trusted useful?", "Yes. Cross-group Trusted is a setup edge: Trusted members are likely to offer Betray later, converting the edge to Rival."),
+            ("Relationships", "When is Neutral good?", "Neutral is good when it removes an unwanted same-group edge. It is bad when it removes a desired Farm-Filler edge."),
+            ("Relationships", "Why avoid removing all rivalries?", "It destroys accumulated board topology and takes many encounters to rebuild. Release is usually safer."),
+            ("Relationships", "Do links guarantee reinforcements?", "No. They affect eligibility and likelihood. Encounter rules, imprisonment, ranks, leaders, Atlas modifiers and random selection still apply."),
+            ("Scoring", "How are actions selected?", "Every parsed effect becomes an Outcome. Outcomes are grouped by Special, Interrogate or Release and summed. The highest total is highlighted."),
+            ("Scoring", "Why can Release win?", "Release has a neutral baseline. It wins when changing the board and interrogating are both expected to be harmful."),
+            ("Scoring", "How is a correct Farm member valued?", "Its base placement value is 30 plus 10 for each rank. Event-specific effects are added separately."),
+            ("Scoring", "Can a good Rival option still be rejected?", "Yes. Rank theft, expelling a desired member, a bad leader change or division-wide damage can outweigh the relationship benefit."),
+            ("Execute", "What does Test of Loyalty change?", "When enabled, Execute is modelled as gaining two ranks instead of one, capped at rank 3."),
+            ("Execute", "What does Lethal Extraction change?", "Execute adds intelligence equal to twice the resulting rank. Run divisions value it positively; Skip divisions value it negatively."),
+            ("Interrogate", "What does Interrogate cost?", "It grants intelligence but temporarily removes the member from encounters and reinforcements. Without protection it also risks losing rank after completion."),
+            ("Interrogate", "How do Unbreaking scarabs change decisions?", "Set 0, 1 or 2 scarabs. The model uses 0%, 50% or 100% expected rank preservation, while retaining the temporary absence penalty."),
+            ("Interrogate", "Why not always interrogate with two scarabs?", "The member still disappears for three encounters, may lose leadership immediately, and may generate intelligence for a Skip division."),
+            ("Safehouses", "Why did the plugin warn that a safehouse is ready?", "A division reached 100 intelligence. The recommendation also checks whether its desired members are placed and ranked."),
+            ("Safehouses", "Does completing Catarina reset the board?", "Current game behaviour no longer resets the Immortal Syndicate board, but Catarina Focus remains a secondary and less-tested mode."),
+            ("Atlas", "Why are drop-only Atlas passives missing?", "Settings are exposed only when they change a board decision. Extra veiled drops or equipment do not currently alter Special, Interrogate or Release scoring."),
+            ("Debug", "Why did the old DebugMode appear to show nothing?", "It only emitted five-second ExileCore log messages during specific events. The Debug Stats tab now provides persistent live data."),
+            ("Debug", "What does Mega Debug do?", "It adds verbose per-member and parser logging to the ExileCore debug log. The persistent table remains available in Debug Stats."),
+            ("Debug", "What should I capture for a wrong recommendation?", "Record Action.Id, full English event text, involved members, ranks, divisions, leaders, strategy settings, scarab count, expected action and highlighted action."),
+            ("Overlay", "What do the coloured frames around Syndicate members mean?", "Green means a desired Farm member in a valuable placement (score 30 or higher). Yellow means an acceptable Filler member (score 1 or higher). Red means an unwanted or incorrectly placed member (score 0 or lower). The colours describe configured strategic value, not item rarity or relationship type."),
+            ("Overlay", "What does Priority N | Score X mean?", "Priority is the suggested order for talking to defeated members: Priority 1 first, then 2, then 3. Score is the member's current placement value used to sort that order. Priority 1 also receives a subtle fill. Encounter-choice buttons are evaluated separately after opening the member's choice panel."),
+            ("Interrogate", "What happens when the interrogation queue is full (3/3)?", "Interrogate is treated as unavailable and cannot be recommended. The plugin reads the visible 3/3 prisoner counter before choosing an action, then selects the best Special or Release option instead."),
+            ("Compatibility", "Does localization work?", "Not reliably. Several outcomes are parsed from English event text and regular expressions."),
+            ("Compatibility", "Why can a game update break parsing?", "ExileAPI object layouts, UI child indices, action IDs and event wording can change between patches."),
+            ("Privacy", "Does the plugin send data anywhere?", "No. BetrayalHelper contains no network client and does not depend on WhatsAnAiBridge."),
+            ("Safety", "Does the plugin automate input?", "No. It renders recommendations only and never presses encounter buttons."),
+            ("Troubleshooting", "The board table is empty. What should I do?", "Open the Syndicate board, verify the plugin is enabled, then check Debug Stats. Live statistics refresh while the board panel is visible."),
+            ("Troubleshooting", "No button is highlighted. Why?", "The event may be unsupported, parsing may have failed, or action totals may be tied. Enable Debug and inspect Last decision outcomes."),
+        };
 
 
 
@@ -81,6 +127,30 @@ namespace BetrayalHelper
 
         public override void DrawSettings()
         {
+            bool showConfiguration = false;
+            if (ImGui.BeginTabBar("##betrayal_helper_tabs"))
+            {
+                if (ImGui.BeginTabItem("Configuration"))
+                {
+                    showConfiguration = true;
+                    ImGui.EndTabItem();
+                }
+                if (ImGui.BeginTabItem("Debug Stats"))
+                {
+                    DrawDebugStatsTab();
+                    ImGui.EndTabItem();
+                }
+                if (ImGui.BeginTabItem("FAQ"))
+                {
+                    DrawFaqTab();
+                    ImGui.EndTabItem();
+                }
+                ImGui.EndTabBar();
+            }
+
+            if (!showConfiguration)
+                return;
+
             base.DrawSettings();
 
             // ── Farming Mode selector ────────────────────────────────────────
@@ -303,7 +373,132 @@ namespace BetrayalHelper
             }
         }
 
-        private Vector2N drawTextVector3;
+        private void DrawFaqTab()
+        {
+            ImGui.TextWrapped("Search the complete strategy and plugin behaviour guide. Results match category, question and answer text.");
+            ImGui.SetNextItemWidth(-70);
+            ImGui.InputText("##faq_search", ref _faqSearch, 256);
+            ImGui.SameLine();
+            if (ImGui.Button("Clear"))
+                _faqSearch = "";
+
+            string query = _faqSearch.Trim();
+            int matches = 0;
+            ImGui.Separator();
+            ImGui.BeginChild("##faq_results", System.Numerics.Vector2.Zero, ImGuiChildFlags.Border);
+            foreach (var entry in FaqEntries)
+            {
+                bool match = query.Length == 0
+                    || entry.Category.Contains(query, StringComparison.OrdinalIgnoreCase)
+                    || entry.Question.Contains(query, StringComparison.OrdinalIgnoreCase)
+                    || entry.Answer.Contains(query, StringComparison.OrdinalIgnoreCase);
+                if (!match) continue;
+
+                matches++;
+                ImGui.PushStyleColor(ImGuiCol.Text, new System.Numerics.Vector4(0.45f, 0.75f, 1f, 1f));
+                ImGui.TextUnformatted(entry.Category);
+                ImGui.PopStyleColor();
+                ImGui.PushTextWrapPos();
+                ImGui.TextUnformatted(entry.Question);
+                ImGui.PopTextWrapPos();
+                ImGui.PushStyleColor(ImGuiCol.Text, new System.Numerics.Vector4(0.78f, 0.78f, 0.78f, 1f));
+                ImGui.TextWrapped(entry.Answer);
+                ImGui.PopStyleColor();
+                ImGui.Separator();
+            }
+            if (matches == 0)
+                ImGui.TextDisabled("No FAQ topics match this search.");
+            ImGui.EndChild();
+        }
+
+        private void DrawDebugStatsTab()
+        {
+            ImGui.BeginChild("##debug_stats_full_height", System.Numerics.Vector2.Zero, ImGuiChildFlags.None);
+            bool debugEnabled = Settings.DebugMode.Value;
+            if (ImGui.Checkbox("Enable debug logging", ref debugEnabled))
+                Settings.DebugMode.Value = debugEnabled;
+            bool megaDebugEnabled = Settings.MegaDebugMode.Value;
+            if (ImGui.Checkbox("Enable mega debug logging", ref megaDebugEnabled))
+                Settings.MegaDebugMode.Value = megaDebugEnabled;
+
+            var panel = GameController?.Game?.IngameState?.IngameUi?.SyndicatePanel;
+            bool panelVisible = panel?.IsVisible ?? false;
+            ImGui.Separator();
+            ImGui.Text($"Syndicate panel: {(panelVisible ? "VISIBLE" : "not visible")}");
+            ImGui.Text($"Cached members: {ListBetrayalMasters.Count} / 14");
+            int relationshipRefs = ListBetrayalMasters.Sum(m => m.Relationships?.Count ?? 0);
+            ImGui.Text($"Relationship references: {relationshipRefs} (approximately {relationshipRefs / 2} unique links)");
+            ImGui.Text($"Missing board members: {(_missingMastersFromBoard == null ? "unknown" : string.Join(", ", _missingMastersFromBoard))}");
+
+            foreach (var division in new[] { "Transportation", "Fortification", "Research", "Intervention" })
+            {
+                int count = ListBetrayalMasters.Count(m => m.Job == division);
+                int ranks = ListBetrayalMasters.Where(m => m.Job == division).Sum(m => m.Rank);
+                string role = Settings.DivisionRoles.TryGetValue(division, out var configuredRole) ? configuredRole : "?";
+                bool run = ShouldRunDivision(division);
+                ImGui.Text($"{division}: {count} members, {ranks} ranks, {role}, {(run ? "Run" : "Skip")}");
+            }
+
+            ImGui.Separator();
+            ImGui.Text($"Current event action: {(_eventAction.Length == 0 ? "none" : _eventAction)}");
+            ImGui.Text($"Current event member: {(_masterText.Length == 0 ? "none" : _masterText)}");
+            if (_eventText.Length > 0)
+                ImGui.TextWrapped($"Event text: {_eventText}");
+            ImGui.Text($"Last recommendation: {(_lastRecommendedAction?.ToString() ?? "none")} ({_lastRecommendedScore:+#;-#;0})");
+            ImGui.Text($"Interrogation queue at last decision: {(_lastInterrogationQueueFull.HasValue ? (_lastInterrogationQueueFull.Value ? "FULL (3/3)" : "space available") : "not checked")}");
+            ImGui.Text($"Detected prisoner counter: {_lastInterrogationCounterText}");
+
+            if (_lastOutcomes.Count > 0 && ImGui.BeginTable("##debug_outcomes", 4, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp))
+            {
+                ImGui.TableSetupColumn("Action");
+                ImGui.TableSetupColumn("Type");
+                ImGui.TableSetupColumn("Score");
+                ImGui.TableSetupColumn("Description");
+                ImGui.TableHeadersRow();
+                foreach (var outcome in _lastOutcomes)
+                {
+                    ImGui.TableNextRow();
+                    ImGui.TableSetColumnIndex(0); ImGui.TextUnformatted(outcome.Action.ToString());
+                    ImGui.TableSetColumnIndex(1); ImGui.TextUnformatted(outcome.Type.ToString());
+                    ImGui.TableSetColumnIndex(2); ImGui.TextUnformatted(outcome.Score.ToString());
+                    ImGui.TableSetColumnIndex(3); ImGui.TextWrapped(outcome.Description);
+                }
+                ImGui.EndTable();
+            }
+
+            ImGui.Separator();
+            ImGui.TextUnformatted("Members");
+            float membersTableHeight = Math.Max(120f, ImGui.GetContentRegionAvail().Y - ImGui.GetTextLineHeightWithSpacing());
+            if (ImGui.BeginTable("##debug_members", 7, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.ScrollY, new System.Numerics.Vector2(0, membersTableHeight)))
+            {
+                ImGui.TableSetupColumn("Name");
+                ImGui.TableSetupColumn("Division");
+                ImGui.TableSetupColumn("Rank");
+                ImGui.TableSetupColumn("Leader");
+                ImGui.TableSetupColumn("Score");
+                ImGui.TableSetupColumn("Links");
+                ImGui.TableSetupColumn("Configured role");
+                ImGui.TableHeadersRow();
+                foreach (var member in ListBetrayalMasters.OrderBy(m => m.Job).ThenByDescending(m => m.IsLeader).ThenBy(m => m.Name))
+                {
+                    string role = Settings.DivisionRoles.TryGetValue(member.Job, out var configuredRole) ? configuredRole : "Unassigned";
+                    ImGui.TableNextRow();
+                    ImGui.TableSetColumnIndex(0); ImGui.TextUnformatted(member.Name);
+                    ImGui.TableSetColumnIndex(1); ImGui.TextUnformatted(member.Job);
+                    ImGui.TableSetColumnIndex(2); ImGui.TextUnformatted(member.Rank.ToString());
+                    ImGui.TableSetColumnIndex(3); ImGui.TextUnformatted(member.IsLeader ? "yes" : "");
+                    ImGui.TableSetColumnIndex(4); ImGui.TextUnformatted(member.Score.ToString());
+                    ImGui.TableSetColumnIndex(5); ImGui.TextUnformatted((member.Relationships?.Count ?? 0).ToString());
+                    ImGui.TableSetColumnIndex(6); ImGui.TextUnformatted(role);
+                }
+                ImGui.EndTable();
+            }
+
+            if (!panelVisible)
+                ImGui.TextDisabled("Open the Syndicate board to refresh live member statistics.");
+            ImGui.EndChild();
+        }
+
         public override void Render()
         {
             checkIntel();
@@ -414,11 +609,11 @@ namespace BetrayalHelper
                             if (farmMemberInfo.TryGetValue(member, out var info))
                             {
                                 if (info.job != warningJob)
-                                    wrongPlace.Add($"{member} (in {info.job})");
+                                    wrongPlace.Add($"{member} (currently in {info.job})");
                                 else if (info.rank >= 3)
-                                    ready.Add($"{member} r{info.rank}");
+                                    ready.Add($"{member} - Rank {info.rank}");
                                 else
-                                    notReady.Add($"{member} r{info.rank}/3");
+                                    notReady.Add($"{member} - Rank {info.rank} / 3");
                             }
                             else
                             {
@@ -448,30 +643,49 @@ namespace BetrayalHelper
                 bool anyReady = safeAdvice.Any(a => a.text.Contains("GO NOW!") || a.text.Contains("RUN FOR MEDALLION!") || a.text.Contains("RUN (opportunistic"));
                 if (!anyReady) return;
 
-                ImGui.SetNextWindowPos(new System.Numerics.Vector2(800, 500), ImGuiCond.Once);
-                ImGui.SetNextWindowSize(new System.Numerics.Vector2(800, 380), ImGuiCond.Once);
+                ImGui.SetNextWindowPos(
+                    new System.Numerics.Vector2(Settings.SafehouseWindowX, Settings.SafehouseWindowY),
+                    ImGuiCond.Appearing);
+                ImGui.SetNextWindowSize(
+                    new System.Numerics.Vector2(Settings.SafehouseWindowWidth, Settings.SafehouseWindowHeight),
+                    ImGuiCond.Appearing);
 
                 // Link ImGui's open flag directly to your global one
                 bool isOpen = !hasClosedWindow;
-                string windowTitle = Settings.FarmingMode == FarmingMode.CatarinaFocus
-                    ? "Hideout Intel Warning [CATARINA MODE]"
-                    : "Hideout Intel Warning";
+                string modeLabel = Settings.FarmingMode == FarmingMode.CatarinaFocus
+                    ? "Catarina Focus"
+                    : "Safehouse Rewards";
+                // The text before ### may change, but the stable ID after it makes
+                // both strategies share one window, position and size.
+                string windowTitle = $"BetrayalHelper - Safehouse Ready###BetrayalHelperSafehousePlanner";
 
-                if (ImGui.Begin(windowTitle, ref isOpen, ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoCollapse))
+                if (ImGui.Begin(windowTitle, ref isOpen, ImGuiWindowFlags.NoCollapse))
                 {
-                    string message = "The following jobs have the hideout ready: " + string.Join(", ", warnings);
-                    ImGui.TextWrapped(message);
+                    var windowPos = ImGui.GetWindowPos();
+                    var windowSize = ImGui.GetWindowSize();
+                    Settings.SafehouseWindowX = (int)windowPos.X;
+                    Settings.SafehouseWindowY = (int)windowPos.Y;
+                    Settings.SafehouseWindowWidth = (int)windowSize.X;
+                    Settings.SafehouseWindowHeight = (int)windowSize.Y;
+
+                    ImGui.PushStyleColor(ImGuiCol.Text, new System.Numerics.Vector4(0.95f, 0.72f, 0.18f, 1f));
+                    ImGui.Text("SAFEHOUSE READY");
+                    ImGui.PopStyleColor();
+                    ImGui.SameLine();
+                    ImGui.TextDisabled($"Strategy: {modeLabel}");
+
+                    ImGui.TextWrapped("Ready divisions: " + string.Join(", ", warnings));
 
                     if (Settings.FarmingMode == FarmingMode.CatarinaFocus)
                     {
                         ImGui.PushStyleColor(ImGuiCol.Text, new System.Numerics.Vector4(0.4f, 0.8f, 1f, 1f));
-                        ImGui.TextWrapped("CATARINA MODE: Run every safehouse ASAP for Syndicate Medallion chance (~5-10% per leader)!");
+                        ImGui.TextWrapped("Run every ready safehouse to pursue Syndicate Medallions and Catarina access.");
                         ImGui.PopStyleColor();
                     }
 
                     ImGui.Spacing();
                     ImGui.Separator();
-                    ImGui.Text("Safehouse advice:");
+                    ImGui.TextDisabled("RECOMMENDATION");
                     foreach (var (text, color) in safeAdvice)
                     {
                         ImGui.PushStyleColor(ImGuiCol.Text, color);
@@ -480,7 +694,7 @@ namespace BetrayalHelper
                     }
                     ImGui.Separator();
                     ImGui.Spacing();
-                    ImGui.Text("Readiness:");
+                    ImGui.TextDisabled("TARGET MEMBER READINESS");
                     foreach (var kvp in farmJobs)
                     {
                         var divName = kvp.Key;
@@ -492,22 +706,24 @@ namespace BetrayalHelper
                             if (farmMemberInfo.TryGetValue(member, out var info))
                             {
                                 if (info.job != divName)
-                                    details.Add($"{member}[wrong div]");
+                                    details.Add($"{member}: wrong division ({info.job})");
                                 else if (info.rank >= 3)
-                                { details.Add($"{member} r{info.rank}✓"); ready++; }
+                                { details.Add($"{member}: Rank {info.rank} / 3 - ready"); ready++; }
                                 else
-                                    details.Add($"{member} r{info.rank}/3");
+                                    details.Add($"{member}: Rank {info.rank} / 3");
                             }
                             else
-                                details.Add($"{member}[?]");
+                                details.Add($"{member}: no board data");
                         }
                         float progress = divMembers.Count > 0 ? (float)ready / divMembers.Count : 0f;
-                        string barLabel = $"{divName}  {ready}/{divMembers.Count}  {string.Join("  ", details)}";
+                        string barLabel = $"{divName} - {ready} of {divMembers.Count} ready";
                         ImGui.ProgressBar(progress, new System.Numerics.Vector2(-1, 0), barLabel);
+                        ImGui.TextWrapped(string.Join("   |   ", details));
+                        ImGui.Spacing();
                     }
                     ImGui.Spacing();
 
-                    if (ImGui.Button("Close"))
+                    if (ImGui.Button("Dismiss until area change"))
                     {
                         hasClosedWindow = true;
                     }
@@ -552,7 +768,7 @@ namespace BetrayalHelper
                 updateSyndicateInfo();
 
                 // Collect all visible NPCs with rects and scores, then sort by priority
-                var visibleNpcs = new List<(BetrayalMaster master, RectangleF rect)>();
+                var visibleNpcs = new List<(BetrayalMaster master, RectangleF frameRect, RectangleF nameRect)>();
                 foreach (var label in betrayalLabels)
                 {
                     var nameElement = label.Label.GetChildFromIndices(0, 0);
@@ -561,7 +777,7 @@ namespace BetrayalHelper
                     if (string.IsNullOrEmpty(aux)) continue;
                     var master = ListBetrayalMasters.FirstOrDefault(m => m.Name == aux);
                     if (master is not null)
-                        visibleNpcs.Add((master, label.Label.GetClientRect()));
+                        visibleNpcs.Add((master, label.Label.GetClientRect(), nameElement.GetClientRect()));
                 }
 
                 // Sort: highest score first = click order 1, 2, 3...
@@ -569,7 +785,7 @@ namespace BetrayalHelper
 
                 for (int i = 0; i < visibleNpcs.Count; i++)
                 {
-                    var (master, rect) = visibleNpcs[i];
+                    var (master, rect, nameRect) = visibleNpcs[i];
 
                     Color frameColor;
                     int thickness;
@@ -589,9 +805,19 @@ namespace BetrayalHelper
 
                     Graphics.DrawFrame(rect, frameColor, thickness);
 
-                    // Order number in top-left corner
-                    var textPos = new Vector2N(rect.X + 4, rect.Y + 2);
-                    Graphics.DrawText((i + 1).ToString(), textPos, frameColor);
+                    // Keep the priority label anchored to the actual name element,
+                    // not the much larger interaction-label container.
+                    var priorityPos = new Vector2N(nameRect.X, Math.Max(0, nameRect.Y - 50));
+                    var priorityShadowPos = new Vector2N(priorityPos.X + 2, priorityPos.Y + 2);
+                    var overlayDrawList = ImGui.GetForegroundDrawList();
+                    uint shadowColor = ImGui.ColorConvertFloat4ToU32(new System.Numerics.Vector4(0f, 0f, 0f, 0.9f));
+                    uint priorityColor = ImGui.ColorConvertFloat4ToU32(new System.Numerics.Vector4(
+                        frameColor.R / 255f, frameColor.G / 255f, frameColor.B / 255f, 1f));
+                    overlayDrawList.AddText(ImGui.GetFont(), 44f, priorityShadowPos, shadowColor, $"#{i + 1}");
+                    overlayDrawList.AddText(ImGui.GetFont(), 44f, priorityPos, priorityColor, $"#{i + 1}");
+
+                    var scorePos = new Vector2N(nameRect.X + 62, Math.Max(0, nameRect.Y - 26));
+                    overlayDrawList.AddText(ImGui.GetFont(), 16f, scorePos, priorityColor, $"Score {master.Score}");
                 }
             }
             }
@@ -605,8 +831,12 @@ namespace BetrayalHelper
             if (ingameState.IngameUi.SyndicatePanel.IsVisible)
             {
                 DrawSyndicateBoard(ingameState.IngameUi.SyndicatePanel);
-
-
+            }
+            else
+            {
+                // A later encounter may have identical text and member names but
+                // a different prisoner count, so invalidate between panel opens.
+                _interrogationQueueEventKey = "";
             }
         }
         private void DrawBottomBoardGui()
@@ -905,17 +1135,7 @@ namespace BetrayalHelper
                     // get the name of the current
 
                     var masterPanel = syndicatePanel.BetrayalEventData.GetChildAtIndex(4);
-                    var masterPanelRect = masterPanel.GetClientRectCache;
-
                     _masterText = masterPanel.GetChildAtIndex(4).Text;
-
-                    var masterWindow = masterPanel.GetClientRectCache;
-                    var newWindow = new RectangleF(masterPanelRect.X, masterPanelRect.Y + 30 + masterPanelRect.Height, masterPanelRect.Width, 60);
-                    Vector2 newWindowVector = newWindow.TopLeft;
-                    Graphics.DrawBox(newWindow, Color.Black, 5);
-
-
-                    // draw support text
 
                     if (Settings.DebugMode)
                     {
@@ -985,18 +1205,6 @@ namespace BetrayalHelper
                         auxRank = 1;
                     if (Settings.DebugMode)
                         LogMessage("The auxrank is " + auxRank.ToString(), 5, Color.Yellow);
-                    var filteredMasters = Settings.DivisionRoles.Keys
-                        .Select(job => new MasterWeight(_eventMaster.Name, job, auxRank, GetScore(_eventMaster.Name, job, auxRank)))
-                        .OrderByDescending(mw => mw.Score);
-                    var maxScore = filteredMasters.Any() ? filteredMasters.Max(mw => mw.Score) : 0;
-                    // Display the filtered results
-
-                    var auxColorEvent = Color.White;
-
-                    //LogMessage("The event master score is " + _eventMaster.Score.ToString(), 5, Color.Yellow);
-                    //LogMessage("maxScore " + maxScore.ToString(), 5, Color.Yellow);
-
-
                     // event masters
 
                     _eventMasters = BetrayalEventMembers();
@@ -1006,26 +1214,6 @@ namespace BetrayalHelper
                         if (Settings.DebugMode)
                             LogMessage("Event Masters !!! " + eventMasterAux.ToString(), 5, Color.DarkGoldenrod);
                     }
-
-                    // draw jobs below event master
-                    foreach (var master in filteredMasters)
-                    {
-                        if (master.Job == _eventMaster.Job && _eventMaster.Score < maxScore)
-                        {
-                            auxColorEvent = Color.Yellow;
-                        }
-                        else if (master.Job == _eventMaster.Job && _eventMaster.Score == maxScore)
-                        {
-                            auxColorEvent = Color.Green;
-                        }
-                        else
-                        {
-                            auxColorEvent = Color.White;
-                        }
-                        drawTextVector3 = Graphics.DrawText(master.ToStringJobScore(), newWindowVector, auxColorEvent);
-                        newWindowVector.Y += 10;
-                    }
-
 
                     if (Settings.DebugMode)
                         LogMessage("The event is " + _eventAction.ToString(), 5, Color.Yellow);
@@ -2475,6 +2663,13 @@ namespace BetrayalHelper
 
         public void PrintHighestScoringActionType(List<Outcome> outcomes)
         {
+            _lastOutcomes = outcomes?.ToList() ?? new List<Outcome>();
+            _lastRecommendedAction = null;
+            _lastRecommendedScore = 0;
+            var syndicatePanel = GameController?.Game?.IngameState?.IngameUi?.SyndicatePanel;
+            bool interrogationQueueFull = GetInterrogationQueueFullForCurrentEvent(syndicatePanel);
+            _lastInterrogationQueueFull = interrogationQueueFull;
+
             if (outcomes == null || outcomes.Count == 0)
             {
                 LogMessage("No outcomes provided." ,5,Color.BlueViolet);
@@ -2487,7 +2682,9 @@ namespace BetrayalHelper
                 .Select(g => new
                 {
                     ActionType = g.Key,
-                    TotalScore = g.Sum(o => o.Score),
+                    TotalScore = interrogationQueueFull && g.Key == ActionType.Interrogate
+                        ? -1_000_000
+                        : g.Sum(o => o.Score),
                     Outcomes = g.ToList()
                 })
                 .OrderByDescending(g => g.TotalScore)
@@ -2499,6 +2696,9 @@ namespace BetrayalHelper
                 LogMessage("No valid groups found", 5, Color.BlueViolet);
                 return;
             }
+
+            _lastRecommendedAction = topGroup.ActionType;
+            _lastRecommendedScore = topGroup.TotalScore;
 
             LogMessage($"ActionType with highest score: {topGroup.ActionType}, Total Score: {topGroup.TotalScore}", 5, Color.BlueViolet);
             LogMessage("Matching Outcomes:", 5, Color.BlueViolet);
@@ -2520,6 +2720,52 @@ namespace BetrayalHelper
             else
             {
                 Graphics.DrawFrame(_ReleaseButton, Color.Green, 6);
+            }
+        }
+
+        private bool GetInterrogationQueueFullForCurrentEvent(SyndicatePanel? syndicatePanel)
+        {
+            string eventKey = $"{_eventAction}|{_masterText}|{_eventText}";
+            if (eventKey == _interrogationQueueEventKey)
+                return _cachedInterrogationQueueFull;
+
+            _interrogationQueueEventKey = eventKey;
+            _cachedInterrogationQueueFull = ReadInterrogationQueueFull(syndicatePanel);
+            return _cachedInterrogationQueueFull;
+        }
+
+        private bool ReadInterrogationQueueFull(SyndicatePanel? syndicatePanel)
+        {
+            if (syndicatePanel?.SyndicateStates == null)
+            {
+                _lastInterrogationCounterText = "Syndicate states unavailable";
+                return false;
+            }
+
+            try
+            {
+                // In the current Betrayal board layout, child 18 of a member's
+                // UI card is visible only while that member occupies one of the
+                // three interrogation cells at the bottom of the board.
+                var prisoners = new List<string>();
+                foreach (var state in syndicatePanel.SyndicateStates)
+                {
+                    if (state?.UIElement == null || state.UIElement.ChildCount <= 18)
+                        continue;
+
+                    var prisonerMarker = state.UIElement.GetChildAtIndex(18);
+                    if (prisonerMarker?.IsVisible == true)
+                        prisoners.Add(state.Target?.Name ?? "unknown");
+                }
+
+                _lastInterrogationCounterText = $"{prisoners.Count}/3 occupied"
+                    + (prisoners.Count > 0 ? $" ({string.Join(", ", prisoners)})" : "");
+                return prisoners.Count >= 3;
+            }
+            catch
+            {
+                _lastInterrogationCounterText = "prisoner state read failed";
+                return false;
             }
         }
 

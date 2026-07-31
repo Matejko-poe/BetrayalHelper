@@ -177,6 +177,8 @@ Some outcomes are parsed from English UI text. Game updates or localization chan
 
 ## Debugging
 
+The plugin settings contain a persistent `Debug Stats` tab. It shows the live board state, relationship counts, division summaries, current encounter, last parsed outcomes, last recommendation, and a per-member scoring table. This remains visible while the settings window is open, unlike timed HUD log messages.
+
 Enable `DebugMode` to log:
 
 - action ID,
@@ -187,6 +189,8 @@ Enable `DebugMode` to log:
 - final action score.
 
 Enable `MegaDebugMode` for full member-state output. When reporting an incorrect recommendation, include the information requested in the [bug report template](.github/ISSUE_TEMPLATE/bug_report.yml).
+
+The settings also contain a searchable `FAQ` tab. Search matches category names, questions, and answer text; leaving the field empty displays the complete built-in guide.
 
 ## Build
 

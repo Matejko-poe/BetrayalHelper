@@ -4,6 +4,24 @@ All notable changes to BetrayalHelper are documented here. The format follows Ke
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-07-31
+
+### Added
+
+- Persistent `Debug Stats` settings tab with live board, relationship, division, member, event, outcome, and recommendation diagnostics.
+- Searchable in-HUD `FAQ` tab covering configuration, scoring, relationships, encounters, Atlas passives, scarabs, compatibility, and troubleshooting.
+- Persistent position and size for the safehouse notification window.
+- Coloured member-priority frames with large ordered priority labels and placement scores.
+
+### Fixed
+
+- Debug mode no longer relies exclusively on short-lived ExileCore log messages to expose decision statistics.
+- Safehouse Rewards and Catarina Focus now use one stable window instead of separate ImGui window identities.
+- Replaced internal rank abbreviations and ambiguous missing-data markers with readable labels.
+- Interrogate is no longer recommended while all three prisoner cards are occupied.
+- Removed the obsolete on-board division-score diagnostics overlay.
+- Cached prisoner-state detection per encounter to avoid frame-time spikes.
+
 ### Planned
 
 - Replace more text parsers with stable ExileAPI fields where available.

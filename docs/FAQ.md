@@ -229,6 +229,14 @@ Confirm the folder and `.csproj` name are `BetrayalHelper`, check HUD compile lo
 
 Enable it, open the Syndicate board or encounter-choice UI, and verify the game is using an English client. The overlay is context-sensitive.
 
+### DebugMode is enabled, but I cannot see statistics
+
+Open the plugin settings and select `Debug Stats`. DebugMode still writes timed diagnostic messages to the ExileCore log, while this tab provides the persistent live view: board visibility, cached members, relationship references, division summaries, current event, parsed outcomes, recommendation, and member scores.
+
+### Where is the built-in documentation?
+
+Open the plugin settings and select `FAQ`. Enter any phrase to filter by category, question, or answer; clear the search field to display the full operating guide.
+
 ### The wrong button is highlighted
 
 Enable DebugMode, capture the full event text and board, and open a bug report. Do not choose an action until the text is recorded.
@@ -236,6 +244,22 @@ Enable DebugMode, capture the full event text and board, and open a bug report. 
 ### No button is highlighted
 
 The event may be unsupported, parsing may have failed, or all actions may have tied scores. Debug logs should show the action ID and generated outcomes.
+
+### What do the coloured frames around defeated Syndicate members mean?
+
+- Green: desired Farm member in a valuable placement, with a score of at least 30.
+- Yellow: acceptable Filler member, with a score of at least 1.
+- Red: unwanted or incorrectly placed member, with a score of 0 or lower.
+
+These colours represent configured strategic value. They do not indicate item rarity, friendship, or rivalry.
+
+### What does `Priority N | Score X` mean?
+
+Priority is the suggested conversation order: speak to Priority 1 first, followed by 2 and 3. Score is the member's current placement value used to establish that order. The first member also receives a subtle coloured fill. After opening a member's encounter panel, the plugin evaluates the available action buttons separately.
+
+### What happens when all three interrogation slots are occupied?
+
+When all three prisoner cards are occupied, Interrogate is treated as unavailable regardless of its calculated strategic value. The plugin reads the prisoner marker on each Syndicate member state, excludes Interrogate, and chooses the best available Special or Release action instead. The detected queue state and prisoner names are shown in `Debug Stats` beside the last decision.
 
 ### My saved settings disappeared after upgrading from BetrayalHelperV2
 
