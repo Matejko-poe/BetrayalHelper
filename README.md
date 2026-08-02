@@ -2,6 +2,8 @@
 
 BetrayalHelper is an [ExileCore](https://github.com/exApiTools/ExileApi) plugin for Path of Exile 1. It reads the visible Immortal Syndicate board, evaluates encounter choices, and highlights the action that best supports a configurable safehouse-farming strategy.
 
+This project is a maintained and substantially extended fork of [myrahz/BetrayalHelperRevamped](https://github.com/myrahz/BetrayalHelperRevamped). Credit for the original plugin and its core Betrayal-helper implementation belongs to its original author and contributors.
+
 The plugin is designed primarily for a classic **5-5-2-2 board**: two compact reward divisions and two large filler divisions, connected through carefully selected Trusted and Rival relationships.
 
 > [!IMPORTANT]
