@@ -5,6 +5,7 @@
     public int Rank { get; set; }
     public bool IsLeader { get; set; }
     public List<string> Relationships { get; set; }
+    public Dictionary<string, string> RelationshipStatuses { get; set; }
     public int Score { get; set; }
 
     // Constructor
@@ -15,6 +16,7 @@
         Rank = 0;
         IsLeader = false;
         Relationships = new List<string>();
+        RelationshipStatuses = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         Score = 0;
     }
     public BetrayalMaster(string name, string job, int rank, bool isLeader, List<string> relationships, int score)
@@ -24,6 +26,7 @@
         Rank = rank;
         IsLeader = isLeader;
         Relationships = relationships;
+        RelationshipStatuses = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         Score = score;
     }
     public override string ToString()
@@ -35,7 +38,8 @@
             relationshipNames = string.Join(", ", Relationships);
         }
 
-        return $"Name: {Name}, Job: {Job}, Rank: {Rank}, IsLeader: {IsLeader}, Relationships: {relationshipNames},Score: {Score}";
+        string typedRelationships = string.Join(", ", RelationshipStatuses.Select(x => $"{x.Key}:{x.Value}"));
+        return $"Name: {Name}, Job: {Job}, Rank: {Rank}, IsLeader: {IsLeader}, Relationships: {relationshipNames}, RelationshipTypes: {typedRelationships}, Score: {Score}";
     }
 
     public string ToStringShort()

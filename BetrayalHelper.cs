@@ -86,6 +86,8 @@ namespace BetrayalHelper
             ("Relationships", "When is Neutral good?", "Neutral is good when it removes an unwanted same-group edge. It is bad when it removes a desired Farm-Filler edge."),
             ("Relationships", "Why avoid removing all rivalries?", "It destroys accumulated board topology and takes many encounters to rebuild. Release is usually safer."),
             ("Relationships", "Do links guarantee reinforcements?", "No. They affect eligibility and likelihood. Encounter rules, imprisonment, ranks, leaders, Atlas modifiers and random selection still apply."),
+            ("Relationships", "How does the plugin identify Rival and Trusted links?", "It reads ServerData.BetrayalMemberRelationships directly. Rival and Trusted are supplied by ExileCore from game memory; the plugin does not infer them from line colours."),
+            ("Relationships", "Why are members without relationships left until last?", "When several defeated members are available, connected members are handled first. Leaving an unconnected member for last improves the chance that the remaining encounter option creates a useful new relationship."),
             ("Scoring", "How are actions selected?", "Every parsed effect becomes an Outcome. Outcomes are grouped by Special, Interrogate or Release and summed. The highest total is highlighted."),
             ("Scoring", "Why can Release win?", "Release has a neutral baseline. It wins when changing the board and interrogating are both expected to be harmful."),
             ("Scoring", "How is a correct Farm member valued?", "Its base placement value is 30 plus 10 for each rank. Event-specific effects are added separately."),
@@ -102,7 +104,7 @@ namespace BetrayalHelper
             ("Debug", "What does Mega Debug do?", "It adds verbose per-member and parser logging to the ExileCore debug log. The persistent table remains available in Debug Stats."),
             ("Debug", "What should I capture for a wrong recommendation?", "Record Action.Id, full English event text, involved members, ranks, divisions, leaders, strategy settings, scarab count, expected action and highlighted action."),
             ("Overlay", "What do the coloured frames around Syndicate members mean?", "Green means a desired Farm member in a valuable placement (score 30 or higher). Yellow means an acceptable Filler member (score 1 or higher). Red means an unwanted or incorrectly placed member (score 0 or lower). The colours describe configured strategic value, not item rarity or relationship type."),
-            ("Overlay", "What does Priority N | Score X mean?", "Priority is the suggested order for talking to defeated members: Priority 1 first, then 2, then 3. Score is the member's current placement value used to sort that order. Priority 1 also receives a subtle fill. Encounter-choice buttons are evaluated separately after opening the member's choice panel."),
+            ("Overlay", "What does Priority N | Score X mean?", "Priority is the suggested conversation order: members with existing relationships first and relationship-free members last, then placement score. Priority 1 also receives a subtle fill. Encounter-choice buttons are evaluated separately after opening the member's choice panel."),
             ("Interrogate", "What happens when the interrogation queue is full (3/3)?", "Interrogate is treated as unavailable and cannot be recommended. The plugin reads the visible 3/3 prisoner counter before choosing an action, then selects the best Special or Release option instead."),
             ("Compatibility", "Does localization work?", "Not reliably. Several outcomes are parsed from English event text and regular expressions."),
             ("Compatibility", "Why can a game update break parsing?", "ExileAPI object layouts, UI child indices, action IDs and event wording can change between patches."),
@@ -426,9 +428,39 @@ namespace BetrayalHelper
             ImGui.Separator();
             ImGui.Text($"Syndicate panel: {(panelVisible ? "VISIBLE" : "not visible")}");
             ImGui.Text($"Cached members: {ListBetrayalMasters.Count} / 14");
-            int relationshipRefs = ListBetrayalMasters.Sum(m => m.Relationships?.Count ?? 0);
-            ImGui.Text($"Relationship references: {relationshipRefs} (approximately {relationshipRefs / 2} unique links)");
+            int relationshipRefs = ListBetrayalMasters.Sum(m => m.RelationshipStatuses.Count);
+            int rivalRefs = ListBetrayalMasters.Sum(m => m.RelationshipStatuses.Values.Count(x => x == "Rival"));
+            int trustedRefs = ListBetrayalMasters.Sum(m => m.RelationshipStatuses.Values.Count(x => x == "Trusted"));
+            ImGui.Text($"Relationship references: {relationshipRefs} ({relationshipRefs / 2} unique: {rivalRefs / 2} Rival, {trustedRefs / 2} Trusted)");
             ImGui.Text($"Missing board members: {(_missingMastersFromBoard == null ? "unknown" : string.Join(", ", _missingMastersFromBoard))}");
+
+            if (ImGui.CollapsingHeader("Relationship topology", ImGuiTreeNodeFlags.DefaultOpen))
+            {
+                var uniqueRelationships = GetUniqueRelationships().ToList();
+                if (ImGui.BeginTable("##debug_relationships", 4,
+                    ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.ScrollY,
+                    new System.Numerics.Vector2(0, Math.Min(220f, 28f + uniqueRelationships.Count * 22f))))
+                {
+                    ImGui.TableSetupColumn("Member A");
+                    ImGui.TableSetupColumn("Member B");
+                    ImGui.TableSetupColumn("Status");
+                    ImGui.TableSetupColumn("Strategic role");
+                    ImGui.TableHeadersRow();
+                    foreach (var link in uniqueRelationships)
+                    {
+                        ImGui.TableNextRow();
+                        ImGui.TableSetColumnIndex(0); ImGui.TextUnformatted(link.First);
+                        ImGui.TableSetColumnIndex(1); ImGui.TextUnformatted(link.Second);
+                        ImGui.TableSetColumnIndex(2); ImGui.TextColored(
+                            link.Status == "Rival"
+                                ? new System.Numerics.Vector4(1f, 0.3f, 0.25f, 1f)
+                                : new System.Numerics.Vector4(0.3f, 1f, 0.4f, 1f),
+                            link.Status);
+                        ImGui.TableSetColumnIndex(3); ImGui.TextUnformatted(GetRelationshipStrategicLabel(link.First, link.Second, link.Status));
+                    }
+                    ImGui.EndTable();
+                }
+            }
 
             foreach (var division in new[] { "Transportation", "Fortification", "Research", "Intervention" })
             {
@@ -469,7 +501,7 @@ namespace BetrayalHelper
             ImGui.Separator();
             ImGui.TextUnformatted("Members");
             float membersTableHeight = Math.Max(120f, ImGui.GetContentRegionAvail().Y - ImGui.GetTextLineHeightWithSpacing());
-            if (ImGui.BeginTable("##debug_members", 7, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.ScrollY, new System.Numerics.Vector2(0, membersTableHeight)))
+            if (ImGui.BeginTable("##debug_members", 8, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.ScrollY, new System.Numerics.Vector2(0, membersTableHeight)))
             {
                 ImGui.TableSetupColumn("Name");
                 ImGui.TableSetupColumn("Division");
@@ -477,6 +509,7 @@ namespace BetrayalHelper
                 ImGui.TableSetupColumn("Leader");
                 ImGui.TableSetupColumn("Score");
                 ImGui.TableSetupColumn("Links");
+                ImGui.TableSetupColumn("Types");
                 ImGui.TableSetupColumn("Configured role");
                 ImGui.TableHeadersRow();
                 foreach (var member in ListBetrayalMasters.OrderBy(m => m.Job).ThenByDescending(m => m.IsLeader).ThenBy(m => m.Name))
@@ -489,7 +522,10 @@ namespace BetrayalHelper
                     ImGui.TableSetColumnIndex(3); ImGui.TextUnformatted(member.IsLeader ? "yes" : "");
                     ImGui.TableSetColumnIndex(4); ImGui.TextUnformatted(member.Score.ToString());
                     ImGui.TableSetColumnIndex(5); ImGui.TextUnformatted((member.Relationships?.Count ?? 0).ToString());
-                    ImGui.TableSetColumnIndex(6); ImGui.TextUnformatted(role);
+                    int memberRivals = member.RelationshipStatuses.Values.Count(x => x == "Rival");
+                    int memberTrusted = member.RelationshipStatuses.Values.Count(x => x == "Trusted");
+                    ImGui.TableSetColumnIndex(6); ImGui.TextUnformatted($"R{memberRivals} / T{memberTrusted}");
+                    ImGui.TableSetColumnIndex(7); ImGui.TextUnformatted(role);
                 }
                 ImGui.EndTable();
             }
@@ -780,8 +816,15 @@ namespace BetrayalHelper
                         visibleNpcs.Add((master, label.Label.GetClientRect(), nameElement.GetClientRect()));
                 }
 
-                // Sort: highest score first = click order 1, 2, 3...
-                visibleNpcs = visibleNpcs.OrderByDescending(x => x.master.Score).ToList();
+                // Handle already-connected members first and leave relationship-free
+                // members until last, improving the remaining member's chance to
+                // receive a useful new relationship option.
+                visibleNpcs = visibleNpcs
+                    .OrderBy(x => x.master.RelationshipStatuses.Count == 0)
+                    .ThenByDescending(x => x.master.RelationshipStatuses.Values.Count(status => status == "Rival"))
+                    .ThenByDescending(x => x.master.Score)
+                    .ThenByDescending(x => x.master.RelationshipStatuses.Count)
+                    .ToList();
 
                 for (int i = 0; i < visibleNpcs.Count; i++)
                 {
@@ -1040,6 +1083,7 @@ namespace BetrayalHelper
         {
             var ingameState = GameController.Game.IngameState;
             var syndicatePanel = ingameState.IngameUi.SyndicatePanel;
+            var relationshipMap = ingameState.ServerData.BetrayalMemberRelationships;
 
             ListBetrayalMasters.Clear();
 
@@ -1063,13 +1107,23 @@ namespace BetrayalHelper
                 var job = parts[2].Trim();
                 
 
-                var auxRelationships = singleState.Relations;
-                auxRelationships.RemoveAll(p => p.Job == null);
-                List<string> stateNames = auxRelationships.Select(state => state.ToString().Split(',')[0]).ToList();
+                var typedRelationships = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                var relationshipEntry = relationshipMap.FirstOrDefault(entry =>
+                    entry.Key != null && entry.Key.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+                if (relationshipEntry.Key != null && relationshipEntry.Value != null)
+                {
+                    foreach (var relation in relationshipEntry.Value)
+                    {
+                        if (relation.Key?.Name is { Length: > 0 } relatedName)
+                            typedRelationships[relatedName] = relation.Value.ToString();
+                    }
+                }
+                List<string> stateNames = typedRelationships.Keys.ToList();
 
                 bool isLeader = i < 4;
                 int score = GetScore(name, job, rank);
                 BetrayalMaster betrayalMaster = new BetrayalMaster(name, job, rank, isLeader, stateNames, score);
+                betrayalMaster.RelationshipStatuses = typedRelationships;
 
                 if (Settings.MegaDebugMode)
                     LogMessage(betrayalMaster.ToString(), 5, Color.Red);
@@ -1608,19 +1662,20 @@ namespace BetrayalHelper
 
                                 break;
                             case "RemoveAllRivalries":
-                                //Console.WriteLine("Number is 1");
-                                //Graphics.DrawFrame(_ReleaseButton, Color.Green, 6);
-                                _eventOutcomes.Add(new Outcome(OutcomeType.RemoveRivalries, ActionType.Special, -250, $"AVOID: remove all rivalries"));
+                                int allRivalryRemovalScore = ScoreRemovingExistingRivalries(null);
+                                _eventOutcomes.Add(new Outcome(OutcomeType.RemoveRivalries, ActionType.Special, allRivalryRemovalScore,
+                                    $"Remove all rivalries — topology impact {allRivalryRemovalScore:+#;-#;0}"));
                                 
 
                                 break;
                             case "RemoveAllRivalriesInDivision":
-                                //Console.WriteLine("Number is 1");
-                                //Graphics.DrawFrame(_ReleaseButton, Color.Green, 6);
-
-                                // only remove if there are bad rivalries of any member on this division
-
-                                _eventOutcomes.Add(new Outcome(OutcomeType.RemoveRivalriesInDivision, ActionType.Special, -180, $"AVOID: remove rivalries in division"));
+                                Match rivalryDivisionMatch = Regex.Match(_eventText, @"(Transportation|Fortification|Research|Intervention)", RegexOptions.IgnoreCase);
+                                string rivalryDivision = rivalryDivisionMatch.Success
+                                    ? rivalryDivisionMatch.Groups[1].Value
+                                    : _eventMaster.Job;
+                                int divisionRivalryRemovalScore = ScoreRemovingExistingRivalries(rivalryDivision);
+                                _eventOutcomes.Add(new Outcome(OutcomeType.RemoveRivalriesInDivision, ActionType.Special, divisionRivalryRemovalScore,
+                                    $"Remove rivalries in {rivalryDivision} — topology impact {divisionRivalryRemovalScore:+#;-#;0}"));
                                 break;
                             case "DestroyAllItemsOfRivalDivision":
                                 // se o event master for alguém com mais de 20 de score -> do it
@@ -2614,14 +2669,80 @@ namespace BetrayalHelper
             int expectedRankLossPenalty = member.Score >= 30
                 ? -(int)Math.Round(25 * (1.0 - preserveRankChance))
                 : 0;
-            int networkAbsencePenalty = -Math.Min(30, member.Relationships.Count * 4);
+            int rivalLinks = member.RelationshipStatuses.Values.Count(status => status == "Rival");
+            int trustedLinks = member.RelationshipStatuses.Values.Count(status => status == "Trusted");
+            int networkAbsencePenalty = -Math.Min(40, rivalLinks * 7 + trustedLinks * 4);
             int total = intelligenceValue + expectedRankLossPenalty + networkAbsencePenalty;
 
             outcomes.Add(new Outcome(
                 shouldRun ? OutcomeType.GainInformationToInterestingJob : OutcomeType.GainInformationToBadJob,
                 ActionType.Interrogate,
                 total,
-                $"Interrogate strategy: intel {intelligenceValue:+#;-#;0}, rank-loss risk {expectedRankLossPenalty:+#;-#;0}, network absence {networkAbsencePenalty:+#;-#;0}, Unbreaking {scarabCount}/2"));
+                $"Interrogate strategy: intel {intelligenceValue:+#;-#;0}, rank-loss risk {expectedRankLossPenalty:+#;-#;0}, network absence {networkAbsencePenalty:+#;-#;0} (R{rivalLinks}/T{trustedLinks}), Unbreaking {scarabCount}/2"));
+        }
+
+        private IEnumerable<(string First, string Second, string Status)> GetUniqueRelationships()
+        {
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var member in ListBetrayalMasters)
+            {
+                foreach (var relation in member.RelationshipStatuses)
+                {
+                    string first = string.Compare(member.Name, relation.Key, StringComparison.OrdinalIgnoreCase) <= 0 ? member.Name : relation.Key;
+                    string second = first == member.Name ? relation.Key : member.Name;
+                    string key = $"{first}\u001f{second}";
+                    if (seen.Add(key))
+                        yield return (first, second, relation.Value);
+                }
+            }
+        }
+
+        private string GetRelationshipStrategicLabel(string firstName, string secondName, string status)
+        {
+            int value = GetExistingRelationshipValue(firstName, secondName, status);
+            if (status == "Rival")
+                return value > 0 ? "desired cross-group Rival" : value < 0 ? "undesired same-group Rival" : "unclassified Rival";
+            return value > 0 ? "useful cross-group Trusted seed" : value < 0 ? "undesired same-group Trusted" : "unclassified Trusted";
+        }
+
+        private int GetExistingRelationshipValue(string firstName, string secondName, string status)
+        {
+            var first = ListBetrayalMasters.FirstOrDefault(member => member.Name.Equals(firstName, StringComparison.OrdinalIgnoreCase));
+            var second = ListBetrayalMasters.FirstOrDefault(member => member.Name.Equals(secondName, StringComparison.OrdinalIgnoreCase));
+            if (first == null || second == null)
+                return 0;
+
+            string firstJob = GetMemberEffectiveJob(first.Name, first.Job);
+            string secondJob = GetMemberEffectiveJob(second.Name, second.Job);
+            string firstRole = Settings.DivisionRoles.TryGetValue(firstJob, out var configuredFirstRole) ? configuredFirstRole : "";
+            string secondRole = Settings.DivisionRoles.TryGetValue(secondJob, out var configuredSecondRole) ? configuredSecondRole : "";
+            bool crossGroup = (firstRole == "Farm" && secondRole == "Filler") || (firstRole == "Filler" && secondRole == "Farm");
+            bool sameGroup = firstRole.Length > 0 && firstRole == secondRole;
+
+            if (status == "Rival")
+                return crossGroup ? 140 : sameGroup ? -80 : 20;
+            if (status == "Trusted")
+                return crossGroup ? 65 : sameGroup ? -45 : 10;
+            return 0;
+        }
+
+        private int ScoreRemovingExistingRivalries(string? division)
+        {
+            int retainedTopologyValue = 0;
+            foreach (var link in GetUniqueRelationships().Where(link => link.Status == "Rival"))
+            {
+                if (!string.IsNullOrEmpty(division))
+                {
+                    var first = ListBetrayalMasters.FirstOrDefault(member => member.Name == link.First);
+                    var second = ListBetrayalMasters.FirstOrDefault(member => member.Name == link.Second);
+                    if (first?.Job != division && second?.Job != division)
+                        continue;
+                }
+                retainedTopologyValue += GetExistingRelationshipValue(link.First, link.Second, link.Status);
+            }
+
+            // Removing a valuable edge is harmful; removing a bad same-group edge is useful.
+            return -retainedTopologyValue;
         }
 
         private int GetRankAfterExecute(int currentRank)

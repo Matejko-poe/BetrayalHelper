@@ -65,6 +65,18 @@ No. It recommends choices that move the observed board toward the configured lay
 
 ## Relationships
 
+### How does the plugin know whether a line is Rival or Trusted?
+
+It reads `ServerData.BetrayalMemberRelationships` directly from ExileCore. The game-memory representation supplies both endpoints and the `Rival` or `Trusted` status, so line colours are not inferred from pixels.
+
+### Why are members without relationships left until last?
+
+When multiple defeated members are available, the overlay prioritizes members that already have connections. This leaves an unconnected member until last, improving the opportunity for the remaining choice to create a useful new relationship.
+
+### Where can I inspect the relationships detected by the plugin?
+
+Open `Debug Stats` and expand `Relationship topology`. It lists every unique member pair, its exact Rival or Trusted status, and whether the link is strategically useful or undesirable for the configured Farm/Filler layout.
+
 ### Are all red Rival lines good?
 
 No. For 5-5-2-2 farming, the desired links are generally between Farm and Filler members. Farm-to-Farm and Filler-to-Filler links can consume reinforcement opportunities without helping the target encounter.

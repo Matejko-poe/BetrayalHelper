@@ -4,6 +4,14 @@ All notable changes to BetrayalHelper are documented here. The format follows Ke
 
 ## [Unreleased]
 
+- Read exact Rival and Trusted topology from `ServerData.BetrayalMemberRelationships` instead of incorrectly treating division membership as relationship data.
+- Prioritize already-connected defeated members and leave members without relationships until last.
+- Show exact Rival and Trusted link counts in Debug Stats.
+- Add a scrollable Debug Stats topology table with every unique pair, its exact status, and its strategic classification.
+- Weight Rival links more strongly than Trusted links when evaluating the temporary network loss from Interrogate.
+- Score removal of all rivalries from the actual current topology instead of using a fixed penalty.
+- Document the direct game-memory relationship source in the HUD FAQ and project documentation.
+
 ## [1.1.0] - 2026-07-31
 
 ### Added

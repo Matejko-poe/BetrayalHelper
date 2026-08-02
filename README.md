@@ -11,7 +11,7 @@ The plugin is designed primarily for a classic **5-5-2-2 board**: two compact re
 
 ## Features
 
-- Reads members, divisions, ranks, leaders, relationships, safehouse intelligence, and the current encounter choice.
+- Reads members, divisions, ranks, leaders, typed Rival/Trusted relationships, safehouse intelligence, and the current encounter choice.
 - Highlights the recommended `Special`, `Interrogate`, or `Release` button.
 - Configurable Farm/Filler role for every division.
 - Configurable Run/Skip policy independent of member placement.
@@ -208,7 +208,7 @@ dotnet build .\BetrayalHelper.csproj --no-restore
 
 - SafehouseRewards is better tested than CatarinaFocus.
 - Some UI fields are accessed through child indices and string representations supplied by ExileAPI.
-- Relationship storage currently records connected member names but not every underlying relationship flag.
+- Relationship types are read directly from `ServerData.BetrayalMemberRelationships`; no screen-colour detection is required.
 - Lethal Extraction is currently assumed to use the resulting post-Execute rank.
 - Scarab count is configured manually per mapping setup.
 - Intelligence value is not yet capped precisely by the remaining amount to 100 in every outcome parser.
