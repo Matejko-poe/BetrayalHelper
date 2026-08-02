@@ -73,6 +73,7 @@ namespace BetrayalHelper
         string _interrogationQueueEventKey = "";
         bool _cachedInterrogationQueueFull;
         string _faqSearch = "";
+        string _relationshipNormalization = "none (no relationship preview)";
 
         private static readonly (string Category, string Question, string Answer)[] FaqEntries =
         {
@@ -432,6 +433,7 @@ namespace BetrayalHelper
             int rivalRefs = ListBetrayalMasters.Sum(m => m.RelationshipStatuses.Values.Count(x => x == "Rival"));
             int trustedRefs = ListBetrayalMasters.Sum(m => m.RelationshipStatuses.Values.Count(x => x == "Trusted"));
             ImGui.Text($"Relationship references: {relationshipRefs} ({relationshipRefs / 2} unique: {rivalRefs / 2} Rival, {trustedRefs / 2} Trusted)");
+            ImGui.Text($"Relationship scoring: {_relationshipNormalization}");
             ImGui.Text($"Missing board members: {(_missingMastersFromBoard == null ? "unknown" : string.Join(", ", _missingMastersFromBoard))}");
 
             if (ImGui.CollapsingHeader("Relationship topology", ImGuiTreeNodeFlags.DefaultOpen))
@@ -1085,6 +1087,21 @@ namespace BetrayalHelper
             var syndicatePanel = ingameState.IngameUi.SyndicatePanel;
             var relationshipMap = ingameState.ServerData.BetrayalMemberRelationships;
 
+            var liveRelationships = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
+            foreach (var relationshipEntry in relationshipMap)
+            {
+                if (relationshipEntry.Key?.Name is not { Length: > 0 } memberName || relationshipEntry.Value == null)
+                    continue;
+
+                var memberLinks = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var relation in relationshipEntry.Value)
+                {
+                    if (relation.Key?.Name is { Length: > 0 } relatedName)
+                        memberLinks[relatedName] = relation.Value.ToString();
+                }
+                liveRelationships[memberName] = memberLinks;
+            }
+
             ListBetrayalMasters.Clear();
 
             //foreach (var singleState in syndicateStates)
@@ -1107,17 +1124,9 @@ namespace BetrayalHelper
                 var job = parts[2].Trim();
                 
 
-                var typedRelationships = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-                var relationshipEntry = relationshipMap.FirstOrDefault(entry =>
-                    entry.Key != null && entry.Key.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
-                if (relationshipEntry.Key != null && relationshipEntry.Value != null)
-                {
-                    foreach (var relation in relationshipEntry.Value)
-                    {
-                        if (relation.Key?.Name is { Length: > 0 } relatedName)
-                            typedRelationships[relatedName] = relation.Value.ToString();
-                    }
-                }
+                var typedRelationships = liveRelationships.TryGetValue(name, out var savedRelationships)
+                    ? new Dictionary<string, string>(savedRelationships, StringComparer.OrdinalIgnoreCase)
+                    : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                 List<string> stateNames = typedRelationships.Keys.ToList();
 
                 bool isLeader = i < 4;
@@ -1176,6 +1185,7 @@ namespace BetrayalHelper
                     // ExileCore can expose the choice action one frame before its text
                     // element is populated. Keep parser calls safe during that transition.
                     _eventText = syndicatePanel.BetrayalEventData.EventText ?? string.Empty;
+                    NormalizePreviewedRelationshipState();
                     try { _jobEvent = syndicatePanel.BetrayalEventData.CurrentEncounterJob.Name; }
                     catch { _jobEvent = "Unknown"; }
                     _SpecialButton = syndicatePanel.BetrayalEventData.SpecialButton.GetClientRectCache;
@@ -2577,6 +2587,51 @@ namespace BetrayalHelper
             return 0; // Unknown job — not configured in Settings
         }
 
+        private void NormalizePreviewedRelationshipState()
+        {
+            _relationshipNormalization = "live ServerData (no relationship preview)";
+            var match = Regex.Match(_eventText,
+                @"([A-Za-z]+(?: [A-Za-z]+)*) and ([A-Za-z]+(?: [A-Za-z]+)*) become (Rivals|Trusted|Neutral)",
+                RegexOptions.IgnoreCase);
+            if (!match.Success)
+                return;
+
+            var first = ListBetrayalMasters.FirstOrDefault(x =>
+                x.Name.Equals(match.Groups[1].Value.Trim(), StringComparison.OrdinalIgnoreCase));
+            var second = ListBetrayalMasters.FirstOrDefault(x =>
+                x.Name.Equals(match.Groups[2].Value.Trim(), StringComparison.OrdinalIgnoreCase));
+            if (first == null || second == null)
+            {
+                _relationshipNormalization = "preview detected, member pair not found";
+                return;
+            }
+
+            string preview = match.Groups[3].Value;
+            string? baseline = preview.Equals("Rivals", StringComparison.OrdinalIgnoreCase) ? "Trusted"
+                : preview.Equals("Neutral", StringComparison.OrdinalIgnoreCase) ? "Rival"
+                : null;
+
+            SetRelationshipState(first, second, baseline);
+            SetRelationshipState(second, first, baseline);
+            _relationshipNormalization = baseline == null
+                ? $"{first.Name} / {second.Name}: preview Trusted, baseline no link"
+                : $"{first.Name} / {second.Name}: preview {preview}, baseline assumed {baseline}";
+
+            if (Settings.DebugMode.Value)
+                LogMessage($"[BetrayalHelper] Relationship preview normalized: {_relationshipNormalization}", 5, Color.Yellow);
+        }
+
+        private static void SetRelationshipState(BetrayalMaster member, BetrayalMaster other, string? status)
+        {
+            member.RelationshipStatuses.Remove(other.Name);
+            member.Relationships.RemoveAll(x => x.Equals(other.Name, StringComparison.OrdinalIgnoreCase));
+            if (status == null)
+                return;
+
+            member.RelationshipStatuses[other.Name] = status;
+            member.Relationships.Add(other.Name);
+        }
+
         private void AddRelationshipOutcome(List<Outcome> outcomes, string relationshipType, BetrayalMaster first, BetrayalMaster second)
         {
             string firstJob = GetMemberEffectiveJob(first.Name, first.Job);
@@ -2591,7 +2646,7 @@ namespace BetrayalHelper
             if (relationshipType.Equals("Rivals", StringComparison.OrdinalIgnoreCase))
             {
                 int newValue = crossGroup ? 140 : sameGroup ? 70 : 30;
-                string? currentStatus = first.RelationshipStatuses.TryGetValue(second.Name, out var existingStatus) ? existingStatus : null;
+                string? currentStatus = GetRelationshipStatusBeforeChoice(first, second);
                 int existingValue = currentStatus == null ? 0 : GetExistingRelationshipValue(first.Name, second.Name, currentStatus);
                 int score = newValue - existingValue;
                 outcomes.Add(new Outcome(
@@ -2603,7 +2658,7 @@ namespace BetrayalHelper
             else if (relationshipType.Equals("Trusted", StringComparison.OrdinalIgnoreCase))
             {
                 int newValue = crossGroup ? 65 : sameGroup ? 30 : 10;
-                string? currentStatus = first.RelationshipStatuses.TryGetValue(second.Name, out var existingStatus) ? existingStatus : null;
+                string? currentStatus = GetRelationshipStatusBeforeChoice(first, second);
                 int existingValue = currentStatus == null ? 0 : GetExistingRelationshipValue(first.Name, second.Name, currentStatus);
                 int score = newValue - existingValue;
                 outcomes.Add(new Outcome(
@@ -2614,7 +2669,7 @@ namespace BetrayalHelper
             }
             else
             {
-                string? currentStatus = first.RelationshipStatuses.TryGetValue(second.Name, out var existingStatus) ? existingStatus : null;
+                string? currentStatus = GetRelationshipStatusBeforeChoice(first, second);
                 int score = currentStatus == null ? 0 : -GetExistingRelationshipValue(first.Name, second.Name, currentStatus);
                 outcomes.Add(new Outcome(OutcomeType.NeutralWithGoodMember, ActionType.Special, score,
                     $"{first.Name}({firstJob}) + {second.Name}({secondJob}) become Neutral — {(currentStatus == null ? "no known edge" : $"loses {currentStatus} link")}"));
@@ -2659,6 +2714,15 @@ namespace BetrayalHelper
                         yield return (first, second, relation.Value);
                 }
             }
+        }
+
+        private static string? GetRelationshipStatusBeforeChoice(BetrayalMaster first, BetrayalMaster second)
+        {
+            string? currentStatus = first.RelationshipStatuses.TryGetValue(second.Name, out var existingStatus)
+                ? existingStatus
+                : null;
+
+            return currentStatus;
         }
 
         private string GetRelationshipStrategicLabel(string firstName, string secondName, string status)

@@ -4,6 +4,8 @@ All notable changes to BetrayalHelper are documented here. The format follows Ke
 
 ## [Unreleased]
 
+- Normalize the relationship named by the current choice instead of caching topology between conversations; ExileCore's live map can already contain the previewed result.
+- Show the exact preview normalization used by scoring in `Debug Stats` and the debug log.
 - Treat same-group Rival and Trusted relationships as useful instead of applying topology penalties.
 - Score a Trusted-to-Rival conversion by its incremental improvement, avoiding double-counting the existing link.
 - Scale Betray intelligence value by the actual amount instead of applying fixed `+100` or `-50` values.

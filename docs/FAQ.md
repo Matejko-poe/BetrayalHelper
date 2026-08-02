@@ -67,7 +67,7 @@ No. It recommends choices that move the observed board toward the configured lay
 
 ### How does the plugin know whether a line is Rival or Trusted?
 
-It reads `ServerData.BetrayalMemberRelationships` directly from ExileCore. The game-memory representation supplies both endpoints and the `Rival` or `Trusted` status, so line colours are not inferred from pixels.
+It reads `ServerData.BetrayalMemberRelationships` directly from ExileCore. While a decision is displayed, that map can already contain the previewed result, so the plugin reconstructs only the affected pair from the option text instead of caching relationships between conversations. `become Rivals` is conservatively evaluated as Trusted to Rival, `become Trusted` as no link to Trusted, and `become Neutral` as Rival to no link. Line colours are not inferred from pixels.
 
 ### Why are members without relationships left until last?
 
