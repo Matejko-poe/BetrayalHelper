@@ -1173,7 +1173,9 @@ namespace BetrayalHelper
 
 
                     _eventAction = syndicatePanel.BetrayalEventData.Action.Id;
-                    _eventText = syndicatePanel.BetrayalEventData.EventText;
+                    // ExileCore can expose the choice action one frame before its text
+                    // element is populated. Keep parser calls safe during that transition.
+                    _eventText = syndicatePanel.BetrayalEventData.EventText ?? string.Empty;
                     try { _jobEvent = syndicatePanel.BetrayalEventData.CurrentEncounterJob.Name; }
                     catch { _jobEvent = "Unknown"; }
                     _SpecialButton = syndicatePanel.BetrayalEventData.SpecialButton.GetClientRectCache;

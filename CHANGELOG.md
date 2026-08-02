@@ -4,6 +4,7 @@ All notable changes to BetrayalHelper are documented here. The format follows Ke
 
 ## [Unreleased]
 
+- Guard against a transient null encounter text while ExileCore is populating the Betrayal choice panel.
 - Read exact Rival and Trusted topology from `ServerData.BetrayalMemberRelationships` instead of incorrectly treating division membership as relationship data.
 - Prioritize already-connected defeated members and leave members without relationships until last.
 - Show exact Rival and Trusted link counts in Debug Stats.
