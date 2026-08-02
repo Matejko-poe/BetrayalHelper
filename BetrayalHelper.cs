@@ -81,9 +81,9 @@ namespace BetrayalHelper
             ("Configuration", "What is the difference between Farm/Filler and Run/Skip?", "Farm/Filler describes desired member placement. Run/Skip independently describes whether intelligence and completion of that safehouse are desirable."),
             ("Configuration", "Why is the first member marked [L]?", "The first configured member is the preferred leader. Use the arrow buttons to change leader priority."),
             ("Configuration", "Is two the division capacity?", "No. Five is the game limit. Two is the strategic target for a compact Farm division."),
-            ("Relationships", "Is every Rival line good?", "No. Rival between Farm and Filler is valuable. Farm-Farm and Filler-Filler links can waste reinforcement opportunities and are normally penalized."),
+            ("Relationships", "Is every Rival line good?", "Usually yes. Every Rival link can produce additional encounters and options. Farm-Filler links receive the highest value because they also connect the compact reward divisions with the larger reinforcement pool; same-group Rival links remain positive."),
             ("Relationships", "Is Trusted useful?", "Yes. Cross-group Trusted is a setup edge: Trusted members are likely to offer Betray later, converting the edge to Rival."),
-            ("Relationships", "When is Neutral good?", "Neutral is good when it removes an unwanted same-group edge. It is bad when it removes a desired Farm-Filler edge."),
+            ("Relationships", "When is Neutral good?", "Usually only when its other effects outweigh losing the relationship. Becoming Neutral removes a Rival or Trusted link and therefore reduces the encounter network."),
             ("Relationships", "Why avoid removing all rivalries?", "It destroys accumulated board topology and takes many encounters to rebuild. Release is usually safer."),
             ("Relationships", "Do links guarantee reinforcements?", "No. They affect eligibility and likelihood. Encounter rules, imprisonment, ranks, leaders, Atlas modifiers and random selection still apply."),
             ("Relationships", "How does the plugin identify Rival and Trusted links?", "It reads ServerData.BetrayalMemberRelationships directly. Rival and Trusted are supplied by ExileCore from game memory; the plugin does not infer them from line colours."),
@@ -2129,7 +2129,7 @@ namespace BetrayalHelper
         private List<Outcome> StealEventRelationship()
         {
 
-            string pattern = @"\+\d+ (\w+) Intelligence\. ([A-Za-z]+(?: [A-Za-z]+)*) and ([A-Za-z]+(?: [A-Za-z]+)*) become Rivals";
+            string pattern = @"\+(\d+) (\w+) Intelligence\. ([A-Za-z]+(?: [A-Za-z]+)*) and ([A-Za-z]+(?: [A-Za-z]+)*) become Rivals";
 
             List<Outcome> eventOutcome = new List<Outcome>();
             Match match = Regex.Match(_eventText, pattern);
@@ -2137,9 +2137,10 @@ namespace BetrayalHelper
                 LogMessage(" Relationship event ", 5, Color.Red);
             if (match.Success)
             {
-                string encounterType = match.Groups[1].Value;
-                string member1name = match.Groups[2].Value;
-                string member2name = match.Groups[3].Value; ;
+                int intelligenceAmount = int.TryParse(match.Groups[1].Value, out int parsedIntelligence) ? parsedIntelligence : 0;
+                string encounterType = match.Groups[2].Value;
+                string member1name = match.Groups[3].Value;
+                string member2name = match.Groups[4].Value;
                 var member1 = ListBetrayalMasters
                    .Where(master => master.Name == member1name)
                    .OrderByDescending(master => master.Score)
@@ -2162,22 +2163,11 @@ namespace BetrayalHelper
 
 
 
-                // Division type check using effective jobs (handles Job="None" members)
-                var stealFarmSet = Settings.DivisionRoles.Where(kv => kv.Value == "Farm").Select(kv => kv.Key).ToHashSet();
-                var stealBlockSet = Settings.DivisionRoles.Where(kv => kv.Value == "Filler").Select(kv => kv.Key).ToHashSet();
-
                 var stealJob1 = member1 != null ? GetMemberEffectiveJob(member1.Name, member1.Job) : "None";
                 var stealJob2 = member2 != null ? GetMemberEffectiveJob(member2.Name, member2.Job) : "None";
-                var stealScore1 = member1 != null ? GetMemberEffectiveScore(member1) : 0;
-                var stealScore2 = member2 != null ? GetMemberEffectiveScore(member2) : 0;
-
-                bool stealSameType = (stealFarmSet.Contains(stealJob1) && stealFarmSet.Contains(stealJob2))
-                                  || (stealBlockSet.Contains(stealJob1) && stealBlockSet.Contains(stealJob2));
-                bool stealCrossType = (stealFarmSet.Contains(stealJob1) && stealBlockSet.Contains(stealJob2))
-                                   || (stealBlockSet.Contains(stealJob1) && stealFarmSet.Contains(stealJob2));
 
                 if (Settings.DebugMode && member1 != null && member2 != null)
-                    LogMessage($"StealRival: {member1.Name}({stealJob1}) + {member2.Name}({stealJob2}) sameType={stealSameType} crossType={stealCrossType}", 5, Color.Cyan);
+                    LogMessage($"StealRival: {member1.Name}({stealJob1}) + {member2.Name}({stealJob2}), intelligence={intelligenceAmount} {encounterType}", 5, Color.Cyan);
 
                 // Division type is the primary factor; intel direction is secondary bonus/penalty.
                 bool stealGoodIntel = _jobsToGainIntelligence.Contains(encounterType);
@@ -2185,47 +2175,12 @@ namespace BetrayalHelper
                 if (member1 != null && member2 != null)
                     AddRelationshipOutcome(eventOutcome, "Rivals", member1, member2);
 
-                if (stealCrossType)
-                {
-                    // Farm+Filler Rivals: always desirable — lots of cross-division encounters
-                    if (stealGoodIntel)
-                    {
-                        eventOutcome.Add(new Outcome(OutcomeType.GainInformationToInterestingJob, ActionType.Special, 100,
-                            $"Gain intelligence to {encounterType}"));
-                    }
-                    else
-                    {
-                        eventOutcome.Add(new Outcome(OutcomeType.GainInformationToBadJob, ActionType.Special, -30,
-                            $"Gain intelligence to {encounterType} (not a Farm division)"));
-                    }
-                }
-                else if (stealSameType)
-                {
-                    // Same-type rivalry is still useful; only score the intelligence side effect here.
-                    if (stealGoodIntel)
-                    {
-                        eventOutcome.Add(new Outcome(OutcomeType.GainInformationToInterestingJob, ActionType.Special, 100,
-                            $"Gain intelligence to {encounterType}"));
-                    }
-                    else
-                    {
-                        eventOutcome.Add(new Outcome(OutcomeType.GainInformationToBadJob, ActionType.Special, -50,
-                            $"Gain intelligence to {encounterType} (not a Farm division)"));
-                    }
-                }
-                else
-                {
-                    // Unknown divisions — score-based fallback
-                    if ((stealScore1 + stealScore2) > 20)
-                    {
-                        if (stealGoodIntel)
-                            eventOutcome.Add(new Outcome(OutcomeType.GainInformationToInterestingJob, ActionType.Special, 100,
-                                $"Gain intelligence to {encounterType}"));
-                        else
-                            eventOutcome.Add(new Outcome(OutcomeType.GainInformationToBadJob, ActionType.Special, -50,
-                                $"Gain intelligence to {encounterType}"));
-                    }
-                }
+                int intelligenceScore = stealGoodIntel ? intelligenceAmount * 6 : -intelligenceAmount * 2;
+                eventOutcome.Add(new Outcome(
+                    stealGoodIntel ? OutcomeType.GainInformationToInterestingJob : OutcomeType.GainInformationToBadJob,
+                    ActionType.Special,
+                    intelligenceScore,
+                    $"+{intelligenceAmount} {encounterType} Intelligence{(stealGoodIntel ? "" : " (Filler)")}"));
 
 
             }
@@ -2635,27 +2590,34 @@ namespace BetrayalHelper
 
             if (relationshipType.Equals("Rivals", StringComparison.OrdinalIgnoreCase))
             {
-                int score = crossGroup ? 140 : sameGroup ? -80 : 20;
+                int newValue = crossGroup ? 140 : sameGroup ? 70 : 30;
+                string? currentStatus = first.RelationshipStatuses.TryGetValue(second.Name, out var existingStatus) ? existingStatus : null;
+                int existingValue = currentStatus == null ? 0 : GetExistingRelationshipValue(first.Name, second.Name, currentStatus);
+                int score = newValue - existingValue;
                 outcomes.Add(new Outcome(
-                    crossGroup ? OutcomeType.RivalBetweenGoodInterestingMember : OutcomeType.RivalBetweenBadMembers,
+                    OutcomeType.RivalBetweenGoodInterestingMember,
                     ActionType.Special,
                     score,
-                    $"{first.Name}({firstJob}) + {second.Name}({secondJob}) become Rivals — {(crossGroup ? "desired 2↔5 link" : sameGroup ? "undesired same-group link" : "unclassified link")}"));
+                    $"{first.Name}({firstJob}) + {second.Name}({secondJob}) become Rivals — {(crossGroup ? "high-value cross-group link" : sameGroup ? "useful same-group link" : "useful link")}{(currentStatus == null ? "" : $", replaces {currentStatus}")}"));
             }
             else if (relationshipType.Equals("Trusted", StringComparison.OrdinalIgnoreCase))
             {
-                int score = crossGroup ? 65 : sameGroup ? -45 : 10;
+                int newValue = crossGroup ? 65 : sameGroup ? 30 : 10;
+                string? currentStatus = first.RelationshipStatuses.TryGetValue(second.Name, out var existingStatus) ? existingStatus : null;
+                int existingValue = currentStatus == null ? 0 : GetExistingRelationshipValue(first.Name, second.Name, currentStatus);
+                int score = newValue - existingValue;
                 outcomes.Add(new Outcome(
-                    crossGroup ? OutcomeType.FriendlyBetweenGoodInterestingMember : OutcomeType.FriendlyBetweenBadMembers,
+                    OutcomeType.FriendlyBetweenGoodInterestingMember,
                     ActionType.Special,
                     score,
-                    $"{first.Name}({firstJob}) + {second.Name}({secondJob}) become Trusted — {(crossGroup ? "seed for desired 2↔5 Rival" : "wrong reinforcement group")}"));
+                    $"{first.Name}({firstJob}) + {second.Name}({secondJob}) become Trusted — {(crossGroup ? "cross-group Rival seed" : sameGroup ? "useful same-group link" : "useful link")}"));
             }
             else
             {
-                int score = crossGroup ? -140 : sameGroup ? 70 : 0;
+                string? currentStatus = first.RelationshipStatuses.TryGetValue(second.Name, out var existingStatus) ? existingStatus : null;
+                int score = currentStatus == null ? 0 : -GetExistingRelationshipValue(first.Name, second.Name, currentStatus);
                 outcomes.Add(new Outcome(OutcomeType.NeutralWithGoodMember, ActionType.Special, score,
-                    $"{first.Name}({firstJob}) + {second.Name}({secondJob}) become Neutral — {(crossGroup ? "desired edge lost" : sameGroup ? "bad same-group edge removed" : "unclassified")}"));
+                    $"{first.Name}({firstJob}) + {second.Name}({secondJob}) become Neutral — {(currentStatus == null ? "no known edge" : $"loses {currentStatus} link")}"));
             }
         }
 
@@ -2703,8 +2665,8 @@ namespace BetrayalHelper
         {
             int value = GetExistingRelationshipValue(firstName, secondName, status);
             if (status == "Rival")
-                return value > 0 ? "desired cross-group Rival" : value < 0 ? "undesired same-group Rival" : "unclassified Rival";
-            return value > 0 ? "useful cross-group Trusted seed" : value < 0 ? "undesired same-group Trusted" : "unclassified Trusted";
+                return value >= 100 ? "high-value cross-group Rival" : value > 0 ? "useful Rival" : "unclassified Rival";
+            return value >= 60 ? "cross-group Trusted seed" : value > 0 ? "useful Trusted" : "unclassified Trusted";
         }
 
         private int GetExistingRelationshipValue(string firstName, string secondName, string status)
@@ -2722,9 +2684,9 @@ namespace BetrayalHelper
             bool sameGroup = firstRole.Length > 0 && firstRole == secondRole;
 
             if (status == "Rival")
-                return crossGroup ? 140 : sameGroup ? -80 : 20;
+                return crossGroup ? 140 : sameGroup ? 70 : 30;
             if (status == "Trusted")
-                return crossGroup ? 65 : sameGroup ? -45 : 10;
+                return crossGroup ? 65 : sameGroup ? 30 : 10;
             return 0;
         }
 
@@ -2743,7 +2705,7 @@ namespace BetrayalHelper
                 retainedTopologyValue += GetExistingRelationshipValue(link.First, link.Second, link.Status);
             }
 
-            // Removing a valuable edge is harmful; removing a bad same-group edge is useful.
+            // Rival links are valuable reinforcement edges regardless of division.
             return -retainedTopologyValue;
         }
 

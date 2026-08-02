@@ -75,11 +75,11 @@ When multiple defeated members are available, the overlay prioritizes members th
 
 ### Where can I inspect the relationships detected by the plugin?
 
-Open `Debug Stats` and expand `Relationship topology`. It lists every unique member pair, its exact Rival or Trusted status, and whether the link is strategically useful or undesirable for the configured Farm/Filler layout.
+Open `Debug Stats` and expand `Relationship topology`. It lists every unique member pair, its exact Rival or Trusted status, and its strategic value for the configured Farm/Filler layout.
 
 ### Are all red Rival lines good?
 
-No. For 5-5-2-2 farming, the desired links are generally between Farm and Filler members. Farm-to-Farm and Filler-to-Filler links can consume reinforcement opportunities without helping the target encounter.
+Usually yes. Every Rival link can generate additional encounters and decisions. Farm-to-Filler Rival links receive the highest score because they connect the compact reward divisions with the larger filler pool, but same-group Rival links remain positive.
 
 ### Are green Trusted lines bad?
 
@@ -91,11 +91,11 @@ Rivals can appear to oppose or betray each other and tend to produce the encount
 
 ### When should I accept a same-group Rival relationship?
 
-Only when the other side effect is worth more than the topology damage—for example, a critical placement or rank correction. The plugin sums both effects instead of applying a hard veto.
+Normally accept it unless another side effect is worse. A same-group Rival still strengthens the encounter network; it simply receives a lower bonus than a Farm-to-Filler Rival.
 
 ### Why can Neutral be a good result?
 
-Neutral is good when it removes an unwanted Farm-to-Farm or Filler-to-Filler edge. It is strongly negative when it removes a desired Farm-to-Filler edge.
+Neutral normally loses value because it removes an existing Rival or Trusted edge. It is worth accepting only when another effect of the action compensates for that loss.
 
 ### Why is “remove all rivalries” heavily penalized?
 

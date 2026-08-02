@@ -89,15 +89,13 @@ Relationship value depends on both endpoints:
 |---|---|---:|
 | Rival | Farm ↔ Filler | High positive |
 | Trusted | Farm ↔ Filler | Positive; seed for a later Betray/Rival |
-| Rival | Farm ↔ Farm | Negative |
-| Trusted | Farm ↔ Farm | Negative |
-| Rival/Trusted | Filler ↔ Filler | Negative |
-| Neutral | Removes Farm ↔ Filler edge | Strong negative |
-| Neutral | Removes same-group edge | Positive cleanup |
+| Rival | Same group | Positive |
+| Trusted | Same group | Positive; lower than Rival |
+| Neutral | Removes Rival/Trusted edge | Negative |
 
-Why: the useful cross-group edge lets a filler member join a valuable member's encounter. The filler can then be interrogated while the compact reward division stays intact. Same-group edges consume reinforcement opportunities and can pull valuable members into the wrong encounter.
+Why: every relationship expands the reinforcement and decision network. Cross-group edges receive an additional premium because they connect compact reward divisions with the larger filler pool, but same-group links remain useful.
 
-A Rival edge is therefore **not automatically good**. The side effect of the Betray option—rank loss, division-wide rank changes, removal from the organization, leadership changes, or equipment destruction—is scored separately and may outweigh the relationship bonus.
+A Rival edge is positive by itself. The side effect of the Betray option—rank loss, division-wide rank changes, removal from the organization, leadership changes, equipment destruction, or unwanted intelligence—is scored separately and may still outweigh the relationship bonus.
 
 ## Settings
 

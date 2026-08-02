@@ -4,6 +4,10 @@ All notable changes to BetrayalHelper are documented here. The format follows Ke
 
 ## [Unreleased]
 
+- Treat same-group Rival and Trusted relationships as useful instead of applying topology penalties.
+- Score a Trusted-to-Rival conversion by its incremental improvement, avoiding double-counting the existing link.
+- Scale Betray intelligence value by the actual amount instead of applying fixed `+100` or `-50` values.
+- Score becoming Neutral as the loss of the exact current Rival or Trusted edge.
 - Guard against a transient null encounter text while ExileCore is populating the Betrayal choice panel.
 - Read exact Rival and Trusted topology from `ServerData.BetrayalMemberRelationships` instead of incorrectly treating division membership as relationship data.
 - Prioritize already-connected defeated members and leave members without relationships until last.
