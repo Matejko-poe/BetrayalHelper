@@ -76,6 +76,18 @@ namespace BetrayalHelper
             { "Intervention",   false }
         };
 
+        /// <summary>
+        /// Catarina Focus only: keep configured members in selected divisions.
+        /// Member placement in unselected divisions is ignored.
+        /// </summary>
+        public Dictionary<string, bool> CatarinaPreserveDivision { get; set; } = new Dictionary<string, bool>
+        {
+            { "Transportation", false },
+            { "Fortification",  false },
+            { "Research",       false },
+            { "Intervention",   false }
+        };
+
         // "Farm" or "Filler" per division
         // Farm = divisions you run safehouses for; Filler = board blockers
         public Dictionary<string, string> DivisionRoles { get; set; } = new Dictionary<string, string>

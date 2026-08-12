@@ -180,6 +180,18 @@ namespace BetrayalHelper
                 // Auto-set all DivisionShouldRun to true
                 foreach (var div in new[] { "Transportation", "Fortification", "Research", "Intervention" })
                     Settings.DivisionShouldRun[div] = true;
+
+                ImGui.Spacing();
+                ImGui.Text("Preserve configured members (optional):");
+                ImGui.TextWrapped("Checked divisions keep their configured members. Placement in unchecked divisions is ignored.");
+                foreach (var div in new[] { "Transportation", "Fortification", "Research", "Intervention" })
+                {
+                    if (!Settings.CatarinaPreserveDivision.ContainsKey(div))
+                        Settings.CatarinaPreserveDivision[div] = false;
+                    bool preserve = Settings.CatarinaPreserveDivision[div];
+                    if (ImGui.Checkbox($"Preserve {div}##catarina_preserve_{div}", ref preserve))
+                        Settings.CatarinaPreserveDivision[div] = preserve;
+                }
             }
             else
             {
@@ -521,6 +533,23 @@ namespace BetrayalHelper
             return Settings.DivisionRoles.TryGetValue(division, out var role) && role == "Farm";
         }
 
+        private bool ShouldPreserveMemberPlacement(string division)
+        {
+            if (Settings.FarmingMode != FarmingMode.CatarinaFocus)
+                return true;
+
+            return Settings.CatarinaPreserveDivision.TryGetValue(division, out var preserve) && preserve;
+        }
+
+        private IEnumerable<KeyValuePair<string, List<string>>> GetRequiredMemberDivisions()
+        {
+            if (Settings.FarmingMode == FarmingMode.CatarinaFocus)
+                return Settings.DivisionMembers.Where(kv => ShouldPreserveMemberPlacement(kv.Key));
+
+            return Settings.DivisionMembers
+                .Where(kv => Settings.DivisionRoles.TryGetValue(kv.Key, out var role) && role == "Farm");
+        }
+
         private void checkIntel()
         {
             var ingameState = GameController.Game.IngameState;
@@ -554,12 +583,7 @@ namespace BetrayalHelper
             {
                 // In CatarinaFocus mode, treat ALL divisions as worth running (for medallion drops).
                 // In SafehouseRewards mode, only Farm divisions matter for rewards.
-                var farmJobs = Settings.DivisionRoles
-                    .Where(kv => kv.Value == "Farm")
-                    .ToDictionary(
-                        kv => kv.Key,
-                        kv => Settings.DivisionMembers.TryGetValue(kv.Key, out var m) ? m : new List<string>()
-                    );
+                var farmJobs = GetRequiredMemberDivisions().ToDictionary(kv => kv.Key, kv => kv.Value);
 
                 // Read current ranks of farm members from syndicate board
                 var farmMemberInfo = new Dictionary<string, (string job, int rank)>();
@@ -1098,8 +1122,7 @@ namespace BetrayalHelper
               .Except(ListBetrayalMasters.Select(b => b.Name))
               .ToList();
 
-            _mastersToBePresent = Settings.DivisionMembers
-                .Where(kv => Settings.DivisionRoles.TryGetValue(kv.Key, out var r) && r == "Farm")
+            _mastersToBePresent = GetRequiredMemberDivisions()
                 .SelectMany(kv => kv.Value)
                 .Distinct()
                 .ToList();
@@ -1189,8 +1212,7 @@ namespace BetrayalHelper
                             .ToList();
                     }
 
-                    _mastersToBePresent = Settings.DivisionMembers
-                        .Where(kv => Settings.DivisionRoles.TryGetValue(kv.Key, out var r) && r == "Farm")
+                    _mastersToBePresent = GetRequiredMemberDivisions()
                         .SelectMany(kv => kv.Value)
                         .Distinct()
                         .ToList();
@@ -1584,8 +1606,9 @@ namespace BetrayalHelper
                                         }
                                         else
                                         {
-                                            _eventOutcomes.Add(new Outcome(OutcomeType.GainInformationToBadJob, ActionType.Special, 5,
-                                                $"+{intelMatch.Groups[1].Value} {intelJob} Intelligence (Filler)"));
+                                            int intelAmount = int.Parse(intelMatch.Groups[1].Value);
+                                            _eventOutcomes.Add(new Outcome(OutcomeType.GainInformationToBadJob, ActionType.Special, -intelAmount * 8,
+                                                $"Avoid +{intelAmount} {intelJob} Intelligence (Skip/Filler division)"));
                                         }
                                     }
                                 }
@@ -2019,9 +2042,13 @@ namespace BetrayalHelper
                 }
                 else
                 {
-                    //Graphics.DrawFrame(_ReleaseButton, Color.Green, 6);
-                    // Filler intel — low priority: filling filler safehouse = fewer filler encounters in maps
-                    eventOutcome.Add(new Outcome(OutcomeType.GainInformationToBadJob, ActionType.Special, 5, $" Gain intelligence to {jobToCheck} (Filler — low priority)"));
+                    int amount = 1;
+                    var amountMatch = Regex.Match(_eventText, @"\+?(\d+)");
+                    if (amountMatch.Success)
+                        int.TryParse(amountMatch.Groups[1].Value, out amount);
+                    int score = -Math.Max(1, amount) * 8;
+                    eventOutcome.Add(new Outcome(OutcomeType.GainInformationToBadJob, ActionType.Special, score,
+                        $"Avoid +{amount} {jobToCheck} Intelligence (Skip/Filler division)"));
 
                 }
 
@@ -2035,7 +2062,7 @@ namespace BetrayalHelper
             if (currentJob != "None") return currentJob;
             foreach (var kv in Settings.DivisionMembers)
             {
-                if (kv.Value.Contains(memberName))
+                if (kv.Value.Contains(memberName) && ShouldPreserveMemberPlacement(kv.Key))
                     return kv.Key;
             }
             return "None";
@@ -2510,6 +2537,24 @@ namespace BetrayalHelper
 
         public int GetScore(string name, string job, int rank)
         {
+            if (Settings.FarmingMode == FarmingMode.CatarinaFocus)
+            {
+                var intendedPreservedDivision = GetRequiredMemberDivisions()
+                    .FirstOrDefault(kv => kv.Value.Contains(name)).Key;
+
+                if (!string.IsNullOrEmpty(intendedPreservedDivision))
+                    return job == intendedPreservedDivision
+                        ? 30 + Math.Clamp(rank, 0, 3) * 10
+                        : -1;
+
+                if (!ShouldPreserveMemberPlacement(job))
+                    return job == "None" ? 0 : 1;
+
+                bool belongsHere = Settings.DivisionMembers.TryGetValue(job, out var preservedMembers)
+                    && preservedMembers.Contains(name);
+                return belongsHere ? 30 + Math.Clamp(rank, 0, 3) * 10 : -1;
+            }
+
             // Settings are authoritative: if the job is configured in DivisionRoles, use settings
             if (Settings.DivisionRoles.TryGetValue(job, out var role))
             {
@@ -2586,6 +2631,22 @@ namespace BetrayalHelper
         {
             string firstJob = GetMemberEffectiveJob(first.Name, first.Job);
             string secondJob = GetMemberEffectiveJob(second.Name, second.Job);
+            if (Settings.FarmingMode == FarmingMode.CatarinaFocus
+                && (!ShouldPreserveMemberPlacement(firstJob) || !ShouldPreserveMemberPlacement(secondJob)))
+            {
+                int score = relationshipType.Equals("Rivals", StringComparison.OrdinalIgnoreCase) ? 20
+                    : relationshipType.Equals("Trusted", StringComparison.OrdinalIgnoreCase) ? 10
+                    : 0;
+                outcomes.Add(new Outcome(
+                    relationshipType.Equals("Rivals", StringComparison.OrdinalIgnoreCase)
+                        ? OutcomeType.RivalBetweenGoodInterestingMember
+                        : OutcomeType.FriendlyBetweenGoodInterestingMember,
+                    ActionType.Special,
+                    score,
+                    $"{first.Name} + {second.Name}: placement ignored in Catarina Focus"));
+                return;
+            }
+
             bool firstFarm = Settings.DivisionRoles.TryGetValue(firstJob, out var firstRole) && firstRole == "Farm";
             bool secondFarm = Settings.DivisionRoles.TryGetValue(secondJob, out var secondRole) && secondRole == "Farm";
             bool firstFiller = Settings.DivisionRoles.TryGetValue(firstJob, out firstRole) && firstRole == "Filler";
@@ -2747,6 +2808,12 @@ namespace BetrayalHelper
         /// Returns 30 if this member is a Farm division member, 1 if Filler, 0 if unknown.
         private int GetMemberBestPossibleScore(string name)
         {
+            if (Settings.FarmingMode == FarmingMode.CatarinaFocus)
+            {
+                var preserved = GetRequiredMemberDivisions().FirstOrDefault(kv => kv.Value.Contains(name));
+                return string.IsNullOrEmpty(preserved.Key) ? 1 : GetScore(name, preserved.Key, 1);
+            }
+
             foreach (var kv in Settings.DivisionMembers)
             {
                 if (Settings.DivisionRoles.TryGetValue(kv.Key, out var r))
