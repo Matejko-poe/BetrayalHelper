@@ -55,9 +55,9 @@ They store the remaining board members, reduce unwanted placement options, and p
 
 Farm/Filler controls desired member placement. Run/Skip controls whether intelligence and completion of that safehouse are desirable. They are intentionally independent.
 
-### Why is the first member in a division special?
+### Does the first member or preferred leader have special value?
 
-The ordered list treats index zero as the preferred leader. Moving a different member to leadership may therefore receive a lower score.
+No. Configured members form an unordered set. BetrayalHelper does not prefer a particular member as leader and does not penalize a leadership change by identity. It still displays the current leader because leader rank and availability matter when running a safehouse.
 
 ### Does the plugin enforce the layout?
 

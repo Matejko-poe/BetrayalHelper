@@ -15,7 +15,7 @@ The plugin is designed primarily for a classic **5-5-2-2 board**: two compact re
 - Highlights the recommended `Special`, `Interrogate`, or `Release` button.
 - Configurable Farm/Filler role for every division.
 - Configurable Run/Skip policy independent of member placement.
-- Ordered member lists; the first member is treated as the preferred leader.
+- Desired member sets without a preferred-leader requirement.
 - Rank-aware Execute scoring.
 - Optional Atlas-passive modelling for Test of Loyalty and Lethal Extraction.
 - Betrayal Scarab of Unbreaking support from 0 to 2 scarabs.
@@ -68,10 +68,9 @@ ExileCore compiles source plugins when it starts. Build output belongs in `bin/`
 2. Mark the two reward divisions as `Farm` and the two storage divisions as `Filler`.
 3. Put two desired members in each Farm division.
 4. Put five remaining members in each Filler division.
-5. Order each list so the preferred leader is first.
-6. Set Run/Skip separately for every safehouse.
-7. Enable Test of Loyalty or Lethal Extraction only if allocated on your Atlas tree.
-8. Set Unbreaking Scarabs to the number inserted into the current map.
+5. Set Run/Skip separately for every safehouse.
+6. Enable Test of Loyalty or Lethal Extraction only if allocated on your Atlas tree.
+7. Set Unbreaking Scarabs to the number inserted into the current map.
 
 The defaults are examples, not universal economic recommendations. Safehouse rewards change between leagues; configure members for your own goals.
 

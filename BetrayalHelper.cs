@@ -80,7 +80,7 @@ namespace BetrayalHelper
             ("Overview", "What does BetrayalHelper do?", "It reads the visible Immortal Syndicate board and encounter choice, scores Special, Interrogate and Release, then highlights the highest-scoring button. It never clicks for you."),
             ("Overview", "What is the main strategy?", "Safehouse Rewards uses a 5-5-2-2 board: two compact Farm divisions with two desired members and two Filler divisions with five members."),
             ("Configuration", "What is the difference between Farm/Filler and Run/Skip?", "Farm/Filler describes desired member placement. Run/Skip independently describes whether intelligence and completion of that safehouse are desirable."),
-            ("Configuration", "Why is the first member marked [L]?", "The first configured member is the preferred leader. Use the arrow buttons to change leader priority."),
+            ("Configuration", "Does member order or a preferred leader matter?", "No. Configured members are an unordered set. The plugin does not try to make a particular member leader; it only observes the actual leader and rank."),
             ("Configuration", "Is two the division capacity?", "No. Five is the game limit. Two is the strategic target for a compact Farm division."),
             ("Relationships", "Is every Rival line good?", "Usually yes. Every Rival link can produce additional encounters and options. Farm-Filler links receive the highest value because they also connect the compact reward divisions with the larger reinforcement pool; same-group Rival links remain positive."),
             ("Relationships", "Is Trusted useful?", "Yes. Cross-group Trusted is a setup edge: Trusted members are likely to offer Betray later, converting the edge to Rival."),
@@ -272,71 +272,27 @@ namespace BetrayalHelper
 
                 // ── Member table ─────────────────────────────────────────────────
                 int pendingRemove = -1;
-                int swapA = -1, swapB = -1;
-
-                // button size — tall enough to click comfortably
-                var btnSize = new System.Numerics.Vector2(34, 22);
                 var btnSizeX = new System.Numerics.Vector2(28, 22);
 
                 var tableFlags = ImGuiTableFlags.BordersInnerV | ImGuiTableFlags.SizingFixedFit | ImGuiTableFlags.RowBg;
-                if (ImGui.BeginTable($"##members_{div}", 5, tableFlags))
+                if (ImGui.BeginTable($"##members_{div}", 2, tableFlags))
                 {
-                    ImGui.TableSetupColumn("##role", ImGuiTableColumnFlags.WidthFixed, 30);   // [L] / #N
-                    ImGui.TableSetupColumn("Name",   ImGuiTableColumnFlags.WidthStretch);     // name
-                    ImGui.TableSetupColumn("##up",   ImGuiTableColumnFlags.WidthFixed, 38);   // ^
-                    ImGui.TableSetupColumn("##dn",   ImGuiTableColumnFlags.WidthFixed, 38);   // v
-                    ImGui.TableSetupColumn("##rm",   ImGuiTableColumnFlags.WidthFixed, 32);   // x
+                    ImGui.TableSetupColumn("Name", ImGuiTableColumnFlags.WidthStretch);
+                    ImGui.TableSetupColumn("##rm", ImGuiTableColumnFlags.WidthFixed, 32);
 
                     for (int i = 0; i < members.Count; i++)
                     {
                         ImGui.TableNextRow(ImGuiTableRowFlags.None, 24);
 
-                        // Col 0 — role badge
                         ImGui.TableSetColumnIndex(0);
-                        if (i == 0)
-                        {
-                            ImGui.PushStyleColor(ImGuiCol.Text, new System.Numerics.Vector4(1f, 0.85f, 0.1f, 1f));
-                            ImGui.TextUnformatted("[L]");
-                            ImGui.PopStyleColor();
-                        }
-                        else
-                        {
-                            ImGui.PushStyleColor(ImGuiCol.Text, new System.Numerics.Vector4(0.55f, 0.55f, 0.55f, 1f));
-                            ImGui.TextUnformatted($" {i + 1}.");
-                            ImGui.PopStyleColor();
-                        }
-
-                        // Col 1 — name
-                        ImGui.TableSetColumnIndex(1);
-                        System.Numerics.Vector4 nameColor;
-                        if (isFarm)
-                            nameColor = i == 0
-                                ? new System.Numerics.Vector4(0.3f, 1f, 0.3f, 1f)
-                                : new System.Numerics.Vector4(0.6f, 0.9f, 0.6f, 1f);
-                        else
-                            nameColor = new System.Numerics.Vector4(0.8f, 0.8f, 0.8f, 1f);
+                        var nameColor = isFarm
+                            ? new System.Numerics.Vector4(0.6f, 0.9f, 0.6f, 1f)
+                            : new System.Numerics.Vector4(0.8f, 0.8f, 0.8f, 1f);
                         ImGui.PushStyleColor(ImGuiCol.Text, nameColor);
                         ImGui.TextUnformatted(members[i]);
                         ImGui.PopStyleColor();
 
-                        // Col 2 — Up button
-                        ImGui.TableSetColumnIndex(2);
-                        if (i > 0)
-                        {
-                            if (ImGui.Button($"^##{div}_{i}", btnSize))
-                            { swapA = i; swapB = i - 1; }
-                        }
-
-                        // Col 3 — Dn button
-                        ImGui.TableSetColumnIndex(3);
-                        if (i < members.Count - 1)
-                        {
-                            if (ImGui.Button($"v##{div}_{i}", btnSize))
-                            { swapA = i; swapB = i + 1; }
-                        }
-
-                        // Col 4 — Remove button (red tint)
-                        ImGui.TableSetColumnIndex(4);
+                        ImGui.TableSetColumnIndex(1);
                         ImGui.PushStyleColor(ImGuiCol.Button,        new System.Numerics.Vector4(0.55f, 0.1f, 0.1f, 1f));
                         ImGui.PushStyleColor(ImGuiCol.ButtonHovered, new System.Numerics.Vector4(0.85f, 0.2f, 0.2f, 1f));
                         ImGui.PushStyleColor(ImGuiCol.Text,          new System.Numerics.Vector4(1f, 1f, 1f, 1f));
@@ -348,12 +304,6 @@ namespace BetrayalHelper
                     ImGui.EndTable();
                 }
 
-                if (swapA >= 0 && swapB >= 0)
-                {
-                    var tmp = members[swapA];
-                    members[swapA] = members[swapB];
-                    members[swapB] = tmp;
-                }
                 if (pendingRemove >= 0)
                     members.RemoveAt(pendingRemove);
 

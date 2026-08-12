@@ -86,7 +86,7 @@ namespace BetrayalHelper
             { "Intervention",   "Filler" }
         };
 
-        // Ordered member list per division — index 0 = preferred leader
+        // Desired members per division. Ordering has no strategic meaning.
         public Dictionary<string, List<string>> DivisionMembers { get; set; } = new Dictionary<string, List<string>>
         {
             { "Transportation", new List<string> { "Gravicius", "It That Fled" } },
