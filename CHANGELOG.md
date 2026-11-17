@@ -19,9 +19,10 @@ All notable changes to BetrayalHelper are documented here. The format follows Ke
 ### Added
 - Settings tab **System**: live table of every memory read (panel, state vector, names, roster, divisions, leaders, ranks, safehouse intel, relationships, encounter event, prisoner count, configured members) with OK / FAIL / WARN / N/A and details.
 
+- Prisoner count from memory: state+0x90 = 1 (imprisoned) and state+0x94 = turns left (observed 0/0 -> 1/3 for an interrogated member). Provisional; shown as WARN in the System tab until verified with 2-3 prisoners.
+
 ### Removed
 - All UI-tree / screen-position fallbacks (card coordinates, `Position.Y > 1700` prisoner check, `SyndicateStates` wrapper, safehouse UI-element signal). Game memory is the only data source; if the board memory cannot be read, a red "MEMORY READ FAILED" window appears and recommendations are blocked.
-- Prisoner count (3/3 queue) is currently not read (no verified offset); Interrogate stays selectable until the offset is mapped.
 
 ### Fixed
 - Farm division capacity in Execute/swap "no space" checks follows the configured member count instead of a hardcoded 2; null-guard for missing label list; debug header shows real roster size.

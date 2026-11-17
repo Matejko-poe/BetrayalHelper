@@ -264,7 +264,13 @@ namespace BetrayalHelper
                     evOk ? $"{evName}: {evAction} / {evText}" : $"action='{evAction}' text='{evText}' member='{evName}'"));
             }
 
-            rows.Add(new SystemCheck("Prisoner count (3/3)", "N/A", "memory offset not mapped yet; queue treated as not full"));
+            try
+            {
+                var pr = ReadPrisonersFromMemory();
+                rows.Add(new SystemCheck("Prisoners (state+0x90/+0x94)", "WARN",
+                    $"{pr.Count}/3: {(pr.Count == 0 ? "none" : string.Join(", ", pr.Select(x => $"{x.Name} ({x.TurnsLeft} turns left)")))} - provisional, verified with 1 prisoner only"));
+            }
+            catch { rows.Add(new SystemCheck("Prisoners (state+0x90/+0x94)", "FAIL", "read failed")); }
 
             var configured = Settings.DivisionMembers.Values.SelectMany(x => x).Distinct().ToList();
             var notOnBoard = configured.Where(c => !names.Contains(c)).ToList();
@@ -3590,13 +3596,48 @@ namespace BetrayalHelper
             return _cachedInterrogationQueueFull;
         }
 
+        /// <summary>
+        /// Prisoners from the board state vector: state+0x90 = 1 (imprisoned) with state+0x94 = turns left.
+        /// Found with a before/after snapshot (Gravicius interrogated: 0/0 -> 1/3). Provisional until
+        /// verified with 2-3 prisoners and a turn tick.
+        /// </summary>
+        private List<(string Name, int TurnsLeft)> ReadPrisonersFromMemory()
+        {
+            var result = new List<(string, int)>();
+            var mem = GameController?.Memory;
+            var panel = GameController?.Game?.IngameState?.IngameUi?.SyndicatePanel;
+            if (mem == null || panel == null || panel.Address == 0) return result;
+            long start = mem.Read<long>(panel.Address + 0x3F8);
+            long end = mem.Read<long>(panel.Address + 0x400);
+            if (start == 0 || end <= start || (end - start) % 160 != 0) return result;
+            int n = (int)Math.Min(40, (end - start) / 160);
+            for (int i = 0; i < n; i++)
+            {
+                long st = start + i * 160;
+                int flag = mem.Read<int>(st + 0x90);
+                int turns = mem.Read<int>(st + 0x94);
+                if (flag != 1 || turns <= 0 || turns > 10) continue;
+                long targetPtr = mem.Read<long>(st + 0x08);
+                long namePtr = targetPtr != 0 ? mem.Read<long>(targetPtr) : 0;
+                result.Add((NormalizeName(ReadStateString(mem, namePtr)), turns));
+            }
+            return result;
+        }
+
         private bool ReadInterrogationQueueFull(SyndicatePanel? syndicatePanel)
         {
-            // The prisoner flag has no verified memory offset yet. No UI/position heuristics are
-            // allowed, so the queue is treated as "not full" (Interrogate stays selectable) until
-            // the offset is found with a before/after memory snapshot (tools/intel_snap.py).
-            _lastInterrogationCounterText = "prisoner count: memory offset not mapped yet";
-            return false;
+            try
+            {
+                var prisoners = ReadPrisonersFromMemory();
+                _lastInterrogationCounterText = $"{prisoners.Count}/3 occupied"
+                    + (prisoners.Count > 0 ? $" ({string.Join(", ", prisoners.Select(x => $"{x.Name} {x.TurnsLeft}t"))})" : "");
+                return prisoners.Count >= 3;
+            }
+            catch
+            {
+                _lastInterrogationCounterText = "prisoner memory read failed";
+                return false;
+            }
         }
     }
 }
