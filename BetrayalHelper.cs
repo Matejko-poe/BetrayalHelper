@@ -26,6 +26,8 @@ namespace BetrayalHelper
         List<BetrayalMaster> ListBetrayalMasters = new List<BetrayalMaster>();
         bool badJobsAreFull = false;
         bool _memoryReadOk = true;
+        Dictionary<string, Dictionary<string, string>>? _lastRelationships;
+        long _lastRelationshipsTick;
         bool hasClosedWindow = false;
         bool _closedOverviewForCurrentPanel = false;
         private readonly HashSet<string> _readySafehouses = new(StringComparer.OrdinalIgnoreCase);
@@ -244,8 +246,13 @@ namespace BetrayalHelper
 
             int relCount = -1;
             try { relCount = ingame?.ServerData?.BetrayalMemberRelationships?.Count ?? -1; } catch { }
-            rows.Add(new SystemCheck("Relationships (ServerData)", relCount > 0 ? "OK" : "FAIL",
-                relCount > 0 ? $"{relCount} members with relation data" : "BetrayalMemberRelationships empty or unreadable"));
+            if (relCount > 0)
+                rows.Add(new SystemCheck("Relationships (ServerData)", "OK", $"{relCount} members with typed Rival/Trusted data (live)"));
+            else if (_lastRelationships != null && _lastRelationships.Count > 0)
+                rows.Add(new SystemCheck("Relationships (ServerData)", "WARN",
+                    $"live map empty; using last good snapshot ({_lastRelationships.Count} members, {(Environment.TickCount64 - _lastRelationshipsTick) / 1000}s old)"));
+            else
+                rows.Add(new SystemCheck("Relationships (ServerData)", "FAIL", "BetrayalMemberRelationships empty and no earlier snapshot; open the board / an encounter once"));
 
             string evAction = ""; string evText = ""; string evName = ""; bool evVisible = false;
             try
@@ -1619,6 +1626,18 @@ namespace BetrayalHelper
                 catch { }
             }
 
+            // The ExileCore map is sometimes empty for a while. Keep the last non-empty snapshot
+            // instead of treating every member as relationship-free.
+            if (liveRelationships.Count > 0)
+            {
+                _lastRelationships = liveRelationships;
+                _lastRelationshipsTick = Environment.TickCount64;
+            }
+            else if (_lastRelationships != null)
+            {
+                liveRelationships = _lastRelationships;
+            }
+
             var newMasters = new List<BetrayalMaster>();
             var mem = GameController.Memory;
 
@@ -1657,37 +1676,6 @@ namespace BetrayalHelper
                             var typedRelationships = liveRelationships.TryGetValue(name, out var savedRelationships)
                                 ? new Dictionary<string, string>(savedRelationships, StringComparer.OrdinalIgnoreCase)
                                 : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-
-                            if (typedRelationships.Count == 0)
-                            {
-                                try
-                                {
-                                    long relStart = mem.Read<long>(stateAddr + 0x50);
-                                    long relEnd = mem.Read<long>(stateAddr + 0x58);
-                                    if (relEnd > relStart && (relEnd - relStart) % 8 == 0)
-                                    {
-                                        int relCount = (int)((relEnd - relStart) / 8);
-                                        for (int r = 0; r < relCount && r < 20; r++)
-                                        {
-                                            long otherState = mem.Read<long>(relStart + r * 8);
-                                            if (otherState != 0)
-                                            {
-                                                long otherTarget = mem.Read<long>(otherState + 0x08);
-                                                long otherNamePtr = otherTarget != 0 ? mem.Read<long>(otherTarget) : 0;
-                                                string otherName = otherNamePtr != 0 ? mem.ReadStringU(otherNamePtr) : "";
-                                                if (otherName.Equals("ItThatFled", StringComparison.OrdinalIgnoreCase))
-                                                    otherName = "It That Fled";
-
-                                                if (!string.IsNullOrEmpty(otherName) && allMasters.Contains(otherName) && !typedRelationships.ContainsKey(otherName))
-                                                {
-                                                    typedRelationships[otherName] = "Neutral";
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                                catch { }
-                            }
 
                             List<string> stateNames = typedRelationships.Keys.ToList();
                             int score = GetScore(name, job, rank);
