@@ -26,6 +26,7 @@ All notable changes to BetrayalHelper are documented here. The format follows Ke
 - All UI-tree / screen-position fallbacks (card coordinates, `Position.Y > 1700` prisoner check, `SyndicateStates` wrapper, safehouse UI-element signal). Game memory is the only data source; if the board memory cannot be read, a red "MEMORY READ FAILED" window appears and recommendations are blocked.
 
 ### Fixed
+- Safehouse Rewards: Filler divisions are never run (intel there counts as a cost, no run banner), whatever the saved Run tick says. Run can only switch a Farm division off; the Run checkbox is disabled for Filler divisions.
 - Farm division capacity in Execute/swap "no space" checks follows the configured member count instead of a hardcoded 2; null-guard for missing label list; debug header shows real roster size.
 - `ShouldRunDivision` ignored the per-division Run/Skip setting and returned the Farm role; Run is authoritative again (this is what made Release win over +4 Research Intelligence).
 - Board Overview layout: divisions in one row, Outside and Farm Targets below; leader shown by row highlight; all UI text in English.

@@ -412,9 +412,11 @@ namespace BetrayalHelper
                     Settings.DivisionShouldRun[div] = Settings.DivisionRoles.TryGetValue(div, out var r) && r == "Farm";
 
                 bool shouldRun = Settings.DivisionShouldRun[div];
-                bool disabled = Settings.FarmingMode == FarmingMode.CatarinaFocus; // locked to Run in Catarina mode
+                bool isFillerRole = !(Settings.DivisionRoles.TryGetValue(div, out var runRole) && runRole == "Farm");
+                bool disabled = Settings.FarmingMode == FarmingMode.CatarinaFocus || isFillerRole; // Catarina: always run; Filler: never run
 
                 if (disabled) ImGui.BeginDisabled();
+                if (isFillerRole && Settings.FarmingMode != FarmingMode.CatarinaFocus) shouldRun = false;
                 if (ImGui.Checkbox($"Run {div}##run_{div}", ref shouldRun))
                     Settings.DivisionShouldRun[div] = shouldRun;
                 if (disabled) ImGui.EndDisabled();
@@ -858,10 +860,11 @@ namespace BetrayalHelper
             if (Settings.FarmingMode == FarmingMode.CatarinaFocus)
                 return true;
 
-            // The per-division Run/Skip setting is authoritative; Farm role is only the fallback.
-            return Settings.DivisionShouldRun.TryGetValue(division, out var shouldRun)
-                ? shouldRun
-                : IsFarmDivision(division);
+            // Safehouse Rewards: only Farm divisions are ever run; Filler divisions stay untouched
+            // regardless of a stale Run tick. Run/Skip can only turn a Farm division off.
+            if (!IsFarmDivision(division))
+                return false;
+            return !Settings.DivisionShouldRun.TryGetValue(division, out var shouldRun) || shouldRun;
         }
 
         /// <summary>

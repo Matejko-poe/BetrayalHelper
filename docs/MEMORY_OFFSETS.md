@@ -20,6 +20,10 @@ Verified live on 2026-11-17 with the WhatsAnAiBridge (`tools/intel_snap.py` befo
 | `+0x78` | - | NOT intelligence (old assumption); do not use | rejected |
 | `+0x7C`, `+0x80` | float | UI position of the card; must not be used for logic | unused |
 
+## Relationships (open)
+
+`ServerData.BetrayalMemberRelationships` returns 0 entries in 3.30 (stale offset), so Rival/Trusted data is currently not available. State vectors at `+0x38` (pairs, leaders/some members) and `+0x50` (one pointer to another state, leaders only) are not relationships. A blind scan of the first 96 KB of ServerData for member pointers found nothing. Needs a controlled before/after experiment (change one relation, diff).
+
 ## Other sources
 
 - Rival/Trusted topology: `IngameState.ServerData.BetrayalMemberRelationships` (ExileCore wrapper, works).

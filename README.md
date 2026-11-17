@@ -120,6 +120,9 @@ A Rival edge is positive by itself. The side effect of the Betray option—rank 
 
 ### Run policy
 
+In Safehouse Rewards only Farm divisions are run; Filler divisions are left untouched (the Run checkbox is locked for them). Run/Skip can only turn a Farm division off.
+
+
 Run/Skip answers a different question from Farm/Filler: should intelligence for this safehouse be accelerated and should the safehouse be completed at 100 intelligence?
 
 ### Atlas passives
