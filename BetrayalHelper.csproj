@@ -9,13 +9,17 @@
     <AssemblyName>BetrayalHelper</AssemblyName>
     <RootNamespace>BetrayalHelper</RootNamespace>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <exapiPackage Condition="'$(exapiPackage)' == ''">..\..\..</exapiPackage>
   </PropertyGroup>
 
   <ItemGroup>
-    <Reference Include="ExileCore"><HintPath>..\..\..\ExileCore.dll</HintPath></Reference>
-    <Reference Include="GameOffsets"><HintPath>..\..\..\GameOffsets.dll</HintPath></Reference>
-    <Reference Include="ImGui.NET"><HintPath>..\..\..\ImGui.NET.dll</HintPath></Reference>
-    <Reference Include="Newtonsoft.Json"><HintPath>..\..\..\Newtonsoft.Json.dll</HintPath></Reference>
-    <Reference Include="SharpDX.Mathematics"><HintPath>..\..\..\SharpDX.Mathematics.dll</HintPath></Reference>
+    <Reference Include="ExileCore"><HintPath>$(exapiPackage)\ExileCore.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="GameOffsets"><HintPath>$(exapiPackage)\GameOffsets.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="Hexa.NET.ImGui"><HintPath>$(exapiPackage)\Hexa.NET.ImGui.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="Newtonsoft.Json"><HintPath>$(exapiPackage)\Newtonsoft.Json.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="SharpDX.Mathematics"><HintPath>$(exapiPackage)\SharpDX.Mathematics.dll</HintPath><Private>False</Private></Reference>
+  </ItemGroup>
+  <ItemGroup>
+    <Using Include="Hexa.NET.ImGui" />
   </ItemGroup>
 </Project>

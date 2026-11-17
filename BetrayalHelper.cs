@@ -1,4 +1,5 @@
 ﻿using ExileCore;
+using ExileCore.PoEMemory;
 using ExileCore.PoEMemory.Components;
 using ExileCore.PoEMemory.Elements;
 using ExileCore.PoEMemory.MemoryObjects;
@@ -25,6 +26,8 @@ namespace BetrayalHelper
         List<BetrayalMaster> ListBetrayalMasters = new List<BetrayalMaster>();
         bool badJobsAreFull = false;
         bool hasClosedWindow = false;
+        bool _closedOverviewForCurrentPanel = false;
+        private readonly HashSet<string> _readySafehouses = new(StringComparer.OrdinalIgnoreCase);
 
 
         List<string> allMasters = new List<string>
@@ -93,17 +96,17 @@ namespace BetrayalHelper
             ("Scoring", "Why can Release win?", "Release has a neutral baseline. It wins when changing the board and interrogating are both expected to be harmful."),
             ("Scoring", "How is a correct Farm member valued?", "Its base placement value is 30 plus 10 for each rank. Event-specific effects are added separately."),
             ("Scoring", "Can a good Rival option still be rejected?", "Yes. Rank theft, expelling a desired member, a bad leader change or division-wide damage can outweigh the relationship benefit."),
-            ("Execute", "What does Test of Loyalty change?", "When enabled, Execute is modelled as gaining two ranks instead of one, capped at rank 3."),
-            ("Execute", "What does Lethal Extraction change?", "Execute adds intelligence equal to twice the resulting rank. Run divisions value it positively; Skip divisions value it negatively."),
+            ("Execute", "What does Test of Loyalty change?", "Test of Loyalty is no longer present on the Atlas tree in the current game version. Execute always increases rank by 1 (capped at rank 3)."),
+            ("Execute", "What does Lethal Extraction change?", "Lethal Extraction is no longer present on the Atlas tree in the current game version. Execute does not grant additional safehouse intelligence."),
             ("Interrogate", "What does Interrogate cost?", "It grants intelligence but temporarily removes the member from encounters and reinforcements. Without protection it also risks losing rank after completion."),
-            ("Interrogate", "How do Unbreaking scarabs change decisions?", "Set 0, 1 or 2 scarabs. The model uses 0%, 50% or 100% expected rank preservation, while retaining the temporary absence penalty."),
-            ("Interrogate", "Why not always interrogate with two scarabs?", "The member still disappears for three encounters, may lose leadership immediately, and may generate intelligence for a Skip division."),
+            ("Interrogate", "How does Unconditional Release change decisions?", "It gives a 30% chance that the interrogated member keeps rank; the model scales the rank-loss penalty by that chance and keeps the temporary absence penalty."),
+            ("Interrogate", "Why not always interrogate?", "The member still disappears for three encounters, may lose leadership immediately, and may generate intelligence for a Skip division."),
             ("Safehouses", "Why did the plugin warn that a safehouse is ready?", "A division reached 100 intelligence. The recommendation also checks whether its desired members are placed and ranked."),
             ("Safehouses", "Does completing Catarina reset the board?", "Current game behaviour no longer resets the Immortal Syndicate board, but Catarina Focus remains a secondary and less-tested mode."),
             ("Atlas", "Why are drop-only Atlas passives missing?", "Settings are exposed only when they change a board decision. Extra veiled drops or equipment do not currently alter Special, Interrogate or Release scoring."),
             ("Debug", "Why did the old DebugMode appear to show nothing?", "It only emitted five-second ExileCore log messages during specific events. The Debug Stats tab now provides persistent live data."),
             ("Debug", "What does Mega Debug do?", "It adds verbose per-member and parser logging to the ExileCore debug log. The persistent table remains available in Debug Stats."),
-            ("Debug", "What should I capture for a wrong recommendation?", "Record Action.Id, full English event text, involved members, ranks, divisions, leaders, strategy settings, scarab count, expected action and highlighted action."),
+            ("Debug", "What should I capture for a wrong recommendation?", "Record Action.Id, full English event text, involved members, ranks, divisions, leaders, strategy settings, expected action and highlighted action."),
             ("Overlay", "What do the coloured frames around Syndicate members mean?", "Green means a desired Farm member in a valuable placement (score 30 or higher). Yellow means an acceptable Filler member (score 1 or higher). Red means an unwanted or incorrectly placed member (score 0 or lower). The colours describe configured strategic value, not item rarity or relationship type."),
             ("Overlay", "What does Priority N | Score X mean?", "Priority is the suggested conversation order: members with existing relationships first and relationship-free members last, then placement score. Priority 1 also receives a subtle fill. Encounter-choice buttons are evaluated separately after opening the member's choice panel."),
             ("Interrogate", "What happens when the interrogation queue is full (3/3)?", "Interrogate is treated as unavailable and cannot be recommended. The plugin reads the visible 3/3 prisoner counter before choosing an action, then selects the best Special or Release option instead."),
@@ -120,12 +123,49 @@ namespace BetrayalHelper
         public override bool Initialise()
         {
             Name = "BetrayalHelper";
+            NormalizeSettingsNames();
             return true;
+        }
+
+        /// <summary>Engine uses "ItThatFled"; UI/settings use "It That Fled". Compare using one form.</summary>
+        private static string NormalizeName(string name)
+        {
+            if (string.IsNullOrWhiteSpace(name)) return "";
+            name = name.Trim();
+            return name.Replace(" ", "").Equals("ItThatFled", StringComparison.OrdinalIgnoreCase)
+                ? "It That Fled"
+                : name;
+        }
+
+        private void NormalizeSettingsNames()
+        {
+            try
+            {
+                foreach (var key in Settings.DivisionMembers.Keys.ToList())
+                    Settings.DivisionMembers[key] = Settings.DivisionMembers[key]
+                        .Select(NormalizeName).Where(n => n.Length > 0).Distinct().ToList();
+            }
+            catch { }
+        }
+
+        // Rank mechanics from the current Atlas tree (see settings).
+        private double ExtraRankChance =>
+            Math.Min(1.0, (Settings.EnduringLegacy.Value ? 0.50 : 0.0));
+
+        private double KeepRankChance
+        {
+            get
+            {
+                double lose = 1.0;
+                if (Settings.UnconditionalRelease.Value) lose *= 0.70;
+                                return 1.0 - lose;
+            }
         }
 
         public override void AreaChange(AreaInstance area)
         {
             hasClosedWindow = false;
+            _closedOverviewForCurrentPanel = false;
         }
 
         public override void DrawSettings()
@@ -155,6 +195,10 @@ namespace BetrayalHelper
                 return;
 
             base.DrawSettings();
+
+            bool showOverviewConfig = Settings.ShowBoardOverview.Value;
+            if (ImGui.Checkbox("Show Betrayal Board Overview Window", ref showOverviewConfig))
+                Settings.ShowBoardOverview.Value = showOverviewConfig;
 
             // ── Farming Mode selector ────────────────────────────────────────
             ImGui.Spacing();
@@ -350,7 +394,7 @@ namespace BetrayalHelper
             string query = _faqSearch.Trim();
             int matches = 0;
             ImGui.Separator();
-            ImGui.BeginChild("##faq_results", System.Numerics.Vector2.Zero, ImGuiChildFlags.Border);
+            ImGui.BeginChild("##faq_results", System.Numerics.Vector2.Zero, ImGuiChildFlags.Borders);
             foreach (var entry in FaqEntries)
             {
                 bool match = query.Length == 0
@@ -385,20 +429,74 @@ namespace BetrayalHelper
             bool megaDebugEnabled = Settings.MegaDebugMode.Value;
             if (ImGui.Checkbox("Enable mega debug logging", ref megaDebugEnabled))
                 Settings.MegaDebugMode.Value = megaDebugEnabled;
+            bool showOverviewDebug = Settings.ShowBoardOverview.Value;
+            if (ImGui.Checkbox("Show Betrayal Board Overview Window", ref showOverviewDebug))
+                Settings.ShowBoardOverview.Value = showOverviewDebug;
 
             var panel = GameController?.Game?.IngameState?.IngameUi?.SyndicatePanel;
             bool panelVisible = panel?.IsVisible ?? false;
             ImGui.Separator();
-            ImGui.Text($"Syndicate panel: {(panelVisible ? "VISIBLE" : "not visible")}");
-            ImGui.Text($"Cached members: {ListBetrayalMasters.Count} / 14");
+
+            // ── STRATEGIC BOARD GOAL DASHBOARD ─────────────────────────────────────────────
+            string modeName = Settings.FarmingMode == FarmingMode.CatarinaFocus ? "Catarina Focus" : "Safehouse Rewards (5-5-2-2)";
+            ImGui.PushStyleColor(ImGuiCol.Text, new System.Numerics.Vector4(1f, 0.85f, 0.2f, 1f));
+            ImGui.Text($"STRATEGY: {modeName.ToUpper()}");
+            ImGui.PopStyleColor();
+            ImGui.SameLine();
+            ImGui.TextDisabled($"| Syndicate panel: {(panelVisible ? "VISIBLE" : "CLOSED")} | Cached: {ListBetrayalMasters.Count}/14");
+
+            // Calculate strategic KPIs
+            int readyFarmCount = ListBetrayalMasters.Count(m => m.GoalStatus == "READY" && m.Score >= 30);
+            int needsRankFarmCount = ListBetrayalMasters.Count(m => m.GoalStatus == "NEEDS_RANK" && m.Score >= 30);
+            int misplacedCount = ListBetrayalMasters.Count(m => m.GoalStatus == "MISPLACED");
+            int outsideFarmCount = ListBetrayalMasters.Count(m => m.GoalStatus == "OUTSIDE" && !string.IsNullOrEmpty(m.TargetDivision) && Settings.DivisionRoles.TryGetValue(m.TargetDivision, out var tr) && tr == "Farm");
+
+            ImGui.Spacing();
+            ImGui.TextUnformatted("Goal Progress: ");
+            ImGui.SameLine();
+            ImGui.TextColored(new System.Numerics.Vector4(0.1f, 1f, 1f, 1f), $"[★ {readyFarmCount} Farm Ready (R3)]");
+            ImGui.SameLine();
+            ImGui.TextColored(new System.Numerics.Vector4(1f, 0.85f, 0.2f, 1f), $"[▲ {needsRankFarmCount} Need Rank]");
+            ImGui.SameLine();
+            ImGui.TextColored(new System.Numerics.Vector4(1f, 0.6f, 0.1f, 1f), $"[+ {outsideFarmCount} Farm Outside]");
+            ImGui.SameLine();
+            ImGui.TextColored(misplacedCount > 0 ? new System.Numerics.Vector4(1f, 0.25f, 0.25f, 1f) : new System.Numerics.Vector4(0.5f, 0.5f, 0.5f, 1f),
+                $"[✗ {misplacedCount} Misplaced/Intruders]");
+
+            // Immediate Action Guidance Banner
+            ImGui.Spacing();
+            if (misplacedCount > 0)
+            {
+                ImGui.PushStyleColor(ImGuiCol.Text, new System.Numerics.Vector4(1f, 0.35f, 0.35f, 1f));
+                ImGui.TextWrapped($"[ACTION PRIORITY: REMOVE INTRUDERS] {misplacedCount} member(s) are misplaced or blocking Farm divisions! Primary action: INTERROGATE intruders down to Rank 0 / Outside.");
+                ImGui.PopStyleColor();
+            }
+            else if (outsideFarmCount > 0)
+            {
+                ImGui.PushStyleColor(ImGuiCol.Text, new System.Numerics.Vector4(1f, 0.75f, 0.2f, 1f));
+                ImGui.TextWrapped($"[ACTION PRIORITY: RECRUITMENT] {outsideFarmCount} Farm target(s) are Outside the syndicate! Accept encounters/bargains to recruit them into the board.");
+                ImGui.PopStyleColor();
+            }
+            else if (needsRankFarmCount > 0)
+            {
+                ImGui.PushStyleColor(ImGuiCol.Text, new System.Numerics.Vector4(1f, 0.9f, 0.3f, 1f));
+                ImGui.TextWrapped($"[ACTION PRIORITY: RANK UP] Farm targets are in correct divisions! EXECUTE them in encounters to reach Rank 3 (Captain).");
+                ImGui.PopStyleColor();
+            }
+            else if (readyFarmCount >= 4)
+            {
+                ImGui.PushStyleColor(ImGuiCol.Text, new System.Numerics.Vector4(0.2f, 1f, 0.4f, 1f));
+                ImGui.TextWrapped($"[BOARD OPTIMAL: READY TO RAID] All Farm targets are Rank 3! Run your Farm safehouses to collect maximum rewards!");
+                ImGui.PopStyleColor();
+            }
+            ImGui.Separator();
+
             int relationshipRefs = ListBetrayalMasters.Sum(m => m.RelationshipStatuses.Count);
             int rivalRefs = ListBetrayalMasters.Sum(m => m.RelationshipStatuses.Values.Count(x => x == "Rival"));
             int trustedRefs = ListBetrayalMasters.Sum(m => m.RelationshipStatuses.Values.Count(x => x == "Trusted"));
-            ImGui.Text($"Relationship references: {relationshipRefs} ({relationshipRefs / 2} unique: {rivalRefs / 2} Rival, {trustedRefs / 2} Trusted)");
-            ImGui.Text($"Relationship scoring: {_relationshipNormalization}");
-            ImGui.Text($"Missing board members: {(_missingMastersFromBoard == null ? "unknown" : string.Join(", ", _missingMastersFromBoard))}");
+            ImGui.Text($"Relationship topology: {relationshipRefs / 2} unique links ({rivalRefs / 2} Rival, {trustedRefs / 2} Trusted) | Scoring: {_relationshipNormalization}");
 
-            if (ImGui.CollapsingHeader("Relationship topology", ImGuiTreeNodeFlags.DefaultOpen))
+            if (ImGui.CollapsingHeader("Relationship topology", ImGuiTreeNodeFlags.None))
             {
                 var uniqueRelationships = GetUniqueRelationships().ToList();
                 if (ImGui.BeginTable("##debug_relationships", 4,
@@ -463,33 +561,117 @@ namespace BetrayalHelper
             }
 
             ImGui.Separator();
-            ImGui.TextUnformatted("Members");
-            float membersTableHeight = Math.Max(120f, ImGui.GetContentRegionAvail().Y - ImGui.GetTextLineHeightWithSpacing());
-            if (ImGui.BeginTable("##debug_members", 8, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.ScrollY, new System.Numerics.Vector2(0, membersTableHeight)))
+            ImGui.TextUnformatted("Syndicate Characters & Board Status");
+            float membersTableHeight = Math.Max(260f, ImGui.GetContentRegionAvail().Y - 30f);
+            if (ImGui.BeginTable("##debug_members", 9, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.ScrollY | ImGuiTableFlags.Resizable, new System.Numerics.Vector2(0, membersTableHeight)))
             {
-                ImGui.TableSetupColumn("Name");
-                ImGui.TableSetupColumn("Division");
-                ImGui.TableSetupColumn("Rank");
-                ImGui.TableSetupColumn("Leader");
-                ImGui.TableSetupColumn("Score");
-                ImGui.TableSetupColumn("Links");
-                ImGui.TableSetupColumn("Types");
-                ImGui.TableSetupColumn("Configured role");
+                ImGui.TableSetupColumn("Slot & Pos", ImGuiTableColumnFlags.WidthFixed, 135f);
+                ImGui.TableSetupColumn("Name", ImGuiTableColumnFlags.WidthFixed, 95f);
+                ImGui.TableSetupColumn("Detected Div", ImGuiTableColumnFlags.WidthFixed, 115f);
+                ImGui.TableSetupColumn("Target Div", ImGuiTableColumnFlags.WidthFixed, 95f);
+                ImGui.TableSetupColumn("Rank", ImGuiTableColumnFlags.WidthFixed, 55f);
+                ImGui.TableSetupColumn("Status", ImGuiTableColumnFlags.WidthFixed, 105f);
+                ImGui.TableSetupColumn("Goal / Action Needed", ImGuiTableColumnFlags.WidthStretch, 2f);
+                ImGui.TableSetupColumn("Score", ImGuiTableColumnFlags.WidthFixed, 45f);
+                ImGui.TableSetupColumn("Topology", ImGuiTableColumnFlags.WidthFixed, 75f);
                 ImGui.TableHeadersRow();
-                foreach (var member in ListBetrayalMasters.OrderBy(m => m.Job).ThenByDescending(m => m.IsLeader).ThenBy(m => m.Name))
+
+                foreach (var member in ListBetrayalMasters.OrderBy(m => m.Job == "None" ? "Z_Outside" : m.Job).ThenByDescending(m => m.IsLeader).ThenByDescending(m => m.Rank).ThenBy(m => m.Name))
                 {
-                    string role = Settings.DivisionRoles.TryGetValue(member.Job, out var configuredRole) ? configuredRole : "Unassigned";
                     ImGui.TableNextRow();
-                    ImGui.TableSetColumnIndex(0); ImGui.TextUnformatted(member.Name);
-                    ImGui.TableSetColumnIndex(1); ImGui.TextUnformatted(member.Job);
-                    ImGui.TableSetColumnIndex(2); ImGui.TextUnformatted(member.Rank.ToString());
-                    ImGui.TableSetColumnIndex(3); ImGui.TextUnformatted(member.IsLeader ? "yes" : "");
-                    ImGui.TableSetColumnIndex(4); ImGui.TextUnformatted(member.Score.ToString());
-                    ImGui.TableSetColumnIndex(5); ImGui.TextUnformatted((member.Relationships?.Count ?? 0).ToString());
+
+                    // Col 0: Slot & Pos
+                    ImGui.TableSetColumnIndex(0);
+                    if (member.SlotIndex >= 0)
+                        ImGui.TextUnformatted($"Slot #{member.SlotIndex} ({member.ScreenX:0}, {member.ScreenY:0})");
+                    else
+                        ImGui.TextDisabled("Not on board");
+
+                    // Col 1: Name
+                    ImGui.TableSetColumnIndex(1);
+                    ImGui.TextUnformatted(member.Name);
+
+                    // Col 2: Detected Div
+                    ImGui.TableSetColumnIndex(2);
+                    string divDisplay = member.Job == "None" ? "Outside" : member.Job;
+                    if (member.IsLeader)
+                        ImGui.TextColored(new System.Numerics.Vector4(1f, 0.85f, 0.2f, 1f), $"{divDisplay} [L]");
+                    else
+                        ImGui.TextUnformatted(divDisplay);
+
+                    // Col 3: Target Div
+                    ImGui.TableSetColumnIndex(3);
+                    if (!string.IsNullOrEmpty(member.TargetDivision))
+                    {
+                        bool isFarm = Settings.DivisionRoles.TryGetValue(member.TargetDivision, out var tr) && tr == "Farm";
+                        if (isFarm)
+                            ImGui.TextColored(new System.Numerics.Vector4(0.4f, 1f, 0.4f, 1f), $"{member.TargetDivision} [F]");
+                        else
+                            ImGui.TextDisabled(member.TargetDivision);
+                    }
+                    else
+                    {
+                        ImGui.TextDisabled("(any filler)");
+                    }
+
+                    // Col 4: Rank
+                    ImGui.TableSetColumnIndex(4);
+                    if (member.Rank >= 3)
+                        ImGui.TextColored(new System.Numerics.Vector4(0.1f, 1f, 1f, 1f), $"R{member.Rank} ★");
+                    else if (member.Rank > 0)
+                        ImGui.TextUnformatted($"R{member.Rank}");
+                    else
+                        ImGui.TextDisabled("R0");
+
+                    // Col 5: Status Badge
+                    ImGui.TableSetColumnIndex(5);
+                    switch (member.GoalStatus)
+                    {
+                        case "READY":
+                            ImGui.TextColored(new System.Numerics.Vector4(0.1f, 1f, 1f, 1f), "[★ READY]");
+                            break;
+                        case "NEEDS_RANK":
+                            ImGui.TextColored(new System.Numerics.Vector4(1f, 0.85f, 0.2f, 1f), "[▲ NEED RANK]");
+                            break;
+                        case "CORRECT":
+                            ImGui.TextColored(new System.Numerics.Vector4(0.2f, 1f, 0.3f, 1f), "[✓ CORRECT]");
+                            break;
+                        case "MISPLACED":
+                            ImGui.TextColored(new System.Numerics.Vector4(1f, 0.25f, 0.25f, 1f), "[✗ MISPLACED]");
+                            break;
+                        case "OUTSIDE":
+                            ImGui.TextColored(new System.Numerics.Vector4(1f, 0.6f, 0.1f, 1f), "[+ OUTSIDE]");
+                            break;
+                        default:
+                            ImGui.TextColored(new System.Numerics.Vector4(0.65f, 0.65f, 0.65f, 1f), "[○ FILLER]");
+                            break;
+                    }
+
+                    // Col 6: Goal / Action Needed
+                    ImGui.TableSetColumnIndex(6);
+                    if (member.GoalStatus == "MISPLACED")
+                        ImGui.TextColored(new System.Numerics.Vector4(1f, 0.35f, 0.35f, 1f), member.GoalAction);
+                    else if (member.GoalStatus == "READY")
+                        ImGui.TextColored(new System.Numerics.Vector4(0.1f, 1f, 1f, 1f), member.GoalAction);
+                    else if (member.GoalStatus == "NEEDS_RANK")
+                        ImGui.TextColored(new System.Numerics.Vector4(1f, 0.9f, 0.3f, 1f), member.GoalAction);
+                    else
+                        ImGui.TextUnformatted(member.GoalAction);
+
+                    // Col 7: Score
+                    ImGui.TableSetColumnIndex(7);
+                    if (member.Score >= 30)
+                        ImGui.TextColored(new System.Numerics.Vector4(0.2f, 1f, 0.3f, 1f), member.Score.ToString());
+                    else if (member.Score < 0)
+                        ImGui.TextColored(new System.Numerics.Vector4(1f, 0.25f, 0.25f, 1f), member.Score.ToString());
+                    else
+                        ImGui.TextDisabled(member.Score.ToString());
+
+                    // Col 8: Topology
+                    ImGui.TableSetColumnIndex(8);
                     int memberRivals = member.RelationshipStatuses.Values.Count(x => x == "Rival");
                     int memberTrusted = member.RelationshipStatuses.Values.Count(x => x == "Trusted");
-                    ImGui.TableSetColumnIndex(6); ImGui.TextUnformatted($"R{memberRivals} / T{memberTrusted}");
-                    ImGui.TableSetColumnIndex(7); ImGui.TextUnformatted(role);
+                    ImGui.TextUnformatted($"R{memberRivals} / T{memberTrusted}");
                 }
                 ImGui.EndTable();
             }
@@ -509,19 +691,16 @@ namespace BetrayalHelper
 
 
         /// <summary>
-        /// Determines if a division's safehouse should be run when intel is full.
+        /// Determines if a division's safehouse should be run when intel is full or ready.
         /// In CatarinaFocus mode: always run (every safehouse = chance at Syndicate Medallion).
-        /// In SafehouseRewards mode: Farm divisions are priority, but Filler divisions are also
-        /// allowed to run when intel is full (just lower priority — don't block board for them).
+        /// In SafehouseRewards mode: only Farm divisions are run.
         /// </summary>
         private bool ShouldRunDivision(string division)
         {
             if (Settings.FarmingMode == FarmingMode.CatarinaFocus)
                 return true;
 
-            return Settings.DivisionShouldRun.TryGetValue(division, out var shouldRun)
-                ? shouldRun
-                : IsFarmDivision(division);
+            return IsFarmDivision(division);
         }
 
         /// <summary>
@@ -531,6 +710,86 @@ namespace BetrayalHelper
         private bool IsFarmDivision(string division)
         {
             return Settings.DivisionRoles.TryGetValue(division, out var role) && role == "Farm";
+        }
+
+        private void UpdateReadySafehouses(Element boardContainer)
+        {
+            _readySafehouses.Clear();
+
+            var divisionsToCheck = new[] { "Transportation", "Fortification", "Research", "Intervention" };
+            var shIndexMap = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["Intervention"] = 0,
+                ["Transportation"] = 1,
+                ["Research"] = 2,
+                ["Fortification"] = 3
+            };
+
+            foreach (var kv in ReadDivisionIntel())
+                if (kv.Value >= 100 && ShouldRunDivision(kv.Key))
+                    _readySafehouses.Add(kv.Key);
+
+            foreach (var div in divisionsToCheck.Where(_ => false)) // legacy UI/rank signals disabled: real intel is read above
+            {
+                if (!ShouldRunDivision(div) || _readySafehouses.Contains(div))
+                    continue;
+
+                bool isReady = false;
+
+                // Signal 2: In-game board safehouse UI element indicator
+                try
+                {
+                    if (boardContainer != null && shIndexMap.TryGetValue(div, out int shIdx) && boardContainer.Children.Count > shIdx)
+                    {
+                        var shElem = boardContainer.Children[shIdx];
+                        if (shElem != null && shElem.Children.Count > 0)
+                        {
+                            foreach (var ch in shElem.Children)
+                            {
+                                if (ch.IsVisible || ch.IsVisibleLocal)
+                                {
+                                    isReady = true;
+                                    break;
+                                }
+                                string t = ch.Text ?? "";
+                                if (t.IndexOf("100", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                                    t.IndexOf("Raid", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                                    t.IndexOf("Safehouse", StringComparison.OrdinalIgnoreCase) >= 0)
+                                {
+                                    isReady = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                catch { }
+
+                // Signal 3: Strategy readiness (All configured targets in this Farm division are present with Rank 3)
+                try
+                {
+                    if (!isReady && Settings.DivisionMembers.TryGetValue(div, out var targets) && targets != null && targets.Count > 0)
+                    {
+                        var currentDivMembers = ListBetrayalMasters.Where(m => m.Job.Equals(div, StringComparison.OrdinalIgnoreCase)).ToList();
+                        bool allTargetsPresentAndRank3 = targets.All(targetName =>
+                        {
+                            var m = currentDivMembers.FirstOrDefault(x => x.Name.Equals(targetName, StringComparison.OrdinalIgnoreCase));
+                            return m != null && m.Rank >= 3;
+                        });
+
+                        if (allTargetsPresentAndRank3)
+                        {
+                            isReady = true;
+                        }
+                    }
+                }
+                catch { }
+
+                if (isReady)
+                {
+                    _readySafehouses.Add(div);
+                }
+            }
         }
 
         private bool ShouldPreserveMemberPlacement(string division)
@@ -550,34 +809,44 @@ namespace BetrayalHelper
                 .Where(kv => Settings.DivisionRoles.TryGetValue(kv.Key, out var role) && role == "Farm");
         }
 
+        /// <summary>
+        /// Safehouse intelligence (0-100) per division, read from the board state vector.
+        /// Verified live: leader state (first 4 entries) holds intel as int32 at +0x84
+        /// (Tora 72 -> 78 after a +6 Intervention intelligence event).
+        /// </summary>
+        private Dictionary<string, int> ReadDivisionIntel()
+        {
+            var result = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                var mem = GameController?.Memory;
+                var panel = GameController?.Game?.IngameState?.IngameUi?.SyndicatePanel;
+                if (mem == null || panel == null || panel.Address == 0) return result;
+                long start = mem.Read<long>(panel.Address + 0x3F8);
+                long end = mem.Read<long>(panel.Address + 0x400);
+                if (end <= start) return result;
+                int count = (int)Math.Min(4, (end - start) / 160);
+                for (int i = 0; i < count; i++)
+                {
+                    long state = start + i * 160;
+                    long jobPtr = mem.Read<long>(state + 0x18);
+                    long jobNamePtr = jobPtr != 0 ? mem.Read<long>(jobPtr + 0x08) : 0;
+                    string job = jobNamePtr != 0 ? mem.ReadStringU(jobNamePtr) : "";
+                    int intel = mem.Read<int>(state + 0x84);
+                    if (!string.IsNullOrEmpty(job) && job != "None" && intel >= 0 && intel <= 100)
+                        result[job] = intel;
+                }
+            }
+            catch { }
+            return result;
+        }
+
         private void checkIntel()
         {
             var ingameState = GameController.Game.IngameState;
             var syndicatePanel = ingameState.IngameUi.SyndicatePanel;
             if (syndicatePanel == null || !syndicatePanel.IsVisible) return;
-            if (syndicatePanel.SyndicateLeadersData == null) return;
-            var leadersData = syndicatePanel.SyndicateLeadersData.Leaders;
-            var warnings = new List<string>();
-
-            if (leadersData is not null && leadersData.Count() ==4)
-            {
-                foreach (var leaderdata in leadersData)
-                {
-                    if (leaderdata is not null && leaderdata.Job is not null)
-                    {
-                        var intel = leaderdata.Intel;
-                        var job = leaderdata.Job.Name;
-
-                        if (intel >= 100)
-                        {
-
-                            warnings.Add(job);
-                        }
-                    }
-
-
-                }
-            }
+            var warnings = ReadDivisionIntel().Where(kv => kv.Value >= 100).Select(kv => kv.Key).ToList();
 
             if (GameController.Area.CurrentArea.Area.IsHideout && warnings.Count > 0 && !hasClosedWindow)
             {
@@ -588,7 +857,7 @@ namespace BetrayalHelper
                 // Read current ranks of farm members from syndicate board
                 var farmMemberInfo = new Dictionary<string, (string job, int rank)>();
                 var syndicateStates = syndicatePanel.SyndicateStates;
-                if (syndicateStates != null)
+                if (syndicateStates != null && syndicateStates.Count > 0)
                 {
                     for (int i = 0; i < syndicateStates.Count; i++)
                     {
@@ -602,6 +871,14 @@ namespace BetrayalHelper
                         var effectiveRank = stateRank;
                         if (farmJobs.Values.Any(members => members.Contains(stateName)))
                             farmMemberInfo[stateName] = (stateJob, effectiveRank);
+                    }
+                }
+                else
+                {
+                    foreach (var m in ListBetrayalMasters)
+                    {
+                        if (farmJobs.Values.Any(members => members.Contains(m.Name)))
+                            farmMemberInfo[m.Name] = (m.Job, m.Rank);
                     }
                 }
 
@@ -812,6 +1089,10 @@ namespace BetrayalHelper
                     { frameColor = Color.Green; thickness = 6; }
                     else if (master.Score >= 1)
                     { frameColor = Color.Yellow; thickness = 4; }
+                    else if ((master.Job == "None" || string.IsNullOrEmpty(master.Job))
+                        && !string.IsNullOrEmpty(master.TargetDivision)
+                        && Settings.DivisionRoles.TryGetValue(master.TargetDivision, out var recruitRole) && recruitRole == "Farm")
+                    { frameColor = Color.Orange; thickness = 4; } // Farm target still outside: recruit
                     else
                     { frameColor = Color.Red; thickness = 4; }
 
@@ -832,11 +1113,15 @@ namespace BetrayalHelper
                     uint shadowColor = ImGui.ColorConvertFloat4ToU32(new System.Numerics.Vector4(0f, 0f, 0f, 0.9f));
                     uint priorityColor = ImGui.ColorConvertFloat4ToU32(new System.Numerics.Vector4(
                         frameColor.R / 255f, frameColor.G / 255f, frameColor.B / 255f, 1f));
-                    overlayDrawList.AddText(ImGui.GetFont(), 44f, priorityShadowPos, shadowColor, $"#{i + 1}");
-                    overlayDrawList.AddText(ImGui.GetFont(), 44f, priorityPos, priorityColor, $"#{i + 1}");
+                    if (Settings.ShowPriorityOrder.Value)
+                    unsafe
+                    {
+                        overlayDrawList.AddText(ImGui.GetFont(), 44f, priorityShadowPos, shadowColor, $"#{i + 1}");
+                        overlayDrawList.AddText(ImGui.GetFont(), 44f, priorityPos, priorityColor, $"#{i + 1}");
 
-                    var scorePos = new Vector2N(nameRect.X + 62, Math.Max(0, nameRect.Y - 26));
-                    overlayDrawList.AddText(ImGui.GetFont(), 16f, scorePos, priorityColor, $"Score {master.Score}");
+                        var scorePos = new Vector2N(nameRect.X + 62, Math.Max(0, nameRect.Y - 26));
+                        overlayDrawList.AddText(ImGui.GetFont(), 16f, scorePos, priorityColor, $"Score {master.Score}");
+                    }
                 }
             }
             }
@@ -845,14 +1130,16 @@ namespace BetrayalHelper
         }
         private void betrayalWindow()
         {
-            var ingameState = GameController.Game.IngameState;
+            var ingameState = GameController?.Game?.IngameState;
+            var syndicatePanel = ingameState?.IngameUi?.SyndicatePanel;
 
-            if (ingameState.IngameUi.SyndicatePanel.IsVisible)
+            if (syndicatePanel?.IsVisible == true)
             {
-                DrawSyndicateBoard(ingameState.IngameUi.SyndicatePanel);
+                DrawSyndicateBoard(syndicatePanel);
             }
             else
             {
+                _closedOverviewForCurrentPanel = false;
                 // A later encounter may have identical text and member names but
                 // a different prisoner count, so invalidate between panel opens.
                 _interrogationQueueEventKey = "";
@@ -860,24 +1147,42 @@ namespace BetrayalHelper
         }
         private void DrawBottomBoardGui()
         {
+            if (!Settings.ShowBoardOverview.Value || _closedOverviewForCurrentPanel)
+                return;
 
+            var syndicatePanel = GameController?.Game?.IngameState?.IngameUi?.SyndicatePanel;
+            if (syndicatePanel == null || !syndicatePanel.IsVisible)
+                return;
 
+            bool isOpen = true;
+            ImGui.SetNextWindowSize(new Vector2N(920, 420), ImGuiCond.FirstUseEver);
 
+            if (!ImGui.Begin("BetrayalHelper - Board Overview###BetrayalBoardOverview", ref isOpen, ImGuiWindowFlags.None))
+            {
+                ImGui.End();
+                if (!isOpen)
+                    _closedOverviewForCurrentPanel = true;
+                return;
+            }
+
+            if (!isOpen)
+            {
+                _closedOverviewForCurrentPanel = true;
+                ImGui.End();
+                return;
+            }
 
             var transportationBetrayalMasters = ListBetrayalMasters.Where(b => b.Job == "Transportation")
-                .OrderByDescending(b => b.IsLeader).ThenBy(b => b.Rank).ToList();
+                .OrderByDescending(b => b.IsLeader).ThenByDescending(b => b.Rank).ToList();
             var fortificationBetrayalMasters = ListBetrayalMasters.Where(b => b.Job == "Fortification")
-                .OrderByDescending(b => b.IsLeader).ThenBy(b => b.Rank).ToList();
+                .OrderByDescending(b => b.IsLeader).ThenByDescending(b => b.Rank).ToList();
             var researchBetrayalMasters = ListBetrayalMasters.Where(b => b.Job == "Research")
-                .OrderByDescending(b => b.IsLeader).ThenBy(b => b.Rank).ToList();
+                .OrderByDescending(b => b.IsLeader).ThenByDescending(b => b.Rank).ToList();
             var interventionBetrayalMasters = ListBetrayalMasters.Where(b => b.Job == "Intervention")
-                .OrderByDescending(b => b.IsLeader).ThenBy(b => b.Rank).ToList();
-            var unnalocatedBetrayalMasters = ListBetrayalMasters.Where(b => b.Job == "None")
-                .OrderByDescending(b => b.IsLeader).ThenBy(b => b.Rank).ToList();
+                .OrderByDescending(b => b.IsLeader).ThenByDescending(b => b.Rank).ToList();
 
-
-
-            List<string> missingNames = allMasters.Except(ListBetrayalMasters.Select(b => b.Name)).ToList();
+            var outsideMasters = ListBetrayalMasters.Where(b => b.Job == "None" || string.IsNullOrEmpty(b.Job))
+                .OrderByDescending(b => b.Score).ThenBy(b => b.Name).ToList();
 
             var interestingMasters = Settings.DivisionMembers
                 .Where(kv => Settings.DivisionRoles.TryGetValue(kv.Key, out var r) && r == "Farm")
@@ -886,154 +1191,305 @@ namespace BetrayalHelper
                 .ToList();
 
             var allLists = new List<BetrayalMaster>[] {
-    transportationBetrayalMasters,
-    fortificationBetrayalMasters,
-    researchBetrayalMasters,
-    interventionBetrayalMasters
-};
+                transportationBetrayalMasters,
+                fortificationBetrayalMasters,
+                researchBetrayalMasters,
+                interventionBetrayalMasters
+            };
 
             var headers = new string[] { "Transportation", "Fortification", "Research", "Intervention" };
+            var divIntel = ReadDivisionIntel();
 
+            string modeName = Settings.FarmingMode == FarmingMode.CatarinaFocus ? "Catarina Focus" : "Safehouse Rewards";
+            ImGui.TextColored(new System.Numerics.Vector4(0.95f, 0.72f, 0.18f, 1f), "BETRAYAL BOARD OVERVIEW");
+            ImGui.SameLine();
+            ImGui.TextDisabled($"| Mode: {modeName} | On board: {ListBetrayalMasters.Count}/{allMasters.Count}");
+            var offBoard = allMasters.Where(n => !ListBetrayalMasters.Any(m => m.Name == n)).ToList();
+            if (offBoard.Count > 0)
+                ImGui.TextColored(new System.Numerics.Vector4(0.9f, 0.6f, 0.2f, 1f), "Not on board (prison / absent): " + string.Join(", ", offBoard));
+            // TextUnformatted: '%' in TextDisabled would be treated as a printf format.
+            ImGui.PushStyleColor(ImGuiCol.Text, new System.Numerics.Vector4(0.6f, 0.6f, 0.6f, 1f));
+            ImGui.PushTextWrapPos(0f);
+            ImGui.TextUnformatted("Atlas: Enduring Legacy " + (Settings.EnduringLegacy.Value ? "ON" : "off")
+                + " (extra rank on Execute: " + (int)Math.Round(ExtraRankChance * 100) + " pct) | Unconditional Release "
+                + (Settings.UnconditionalRelease.Value ? "ON" : "off") + " (keep rank on Interrogate: " + (int)Math.Round(KeepRankChance * 100) + " pct)");
+            ImGui.PopTextWrapPos();
+            ImGui.PopStyleColor();
+            ImGui.Separator();
 
+            // ── SAFEHOUSE READY ALERT BANNER ──────────────────────────────────────────
+            var boardContainer = syndicatePanel?.Children?.Count > 0 ? syndicatePanel.Children[0] : null;
+            UpdateReadySafehouses(boardContainer);
 
-
-            // Start main table with one column per list
-            ImGui.BeginTable("MasterTables", allLists.Length, ImGuiTableFlags.Borders);
-
-            for (int t = 0; t < allLists.Length; t++)
+            if (_readySafehouses.Count > 0)
             {
-                ImGui.TableNextColumn();
+                foreach (var readyDiv in _readySafehouses)
+                {
+                    ImGui.PushStyleColor(ImGuiCol.Button, new System.Numerics.Vector4(0.85f, 0.15f, 0.15f, 1f));
+                    ImGui.PushStyleColor(ImGuiCol.ButtonHovered, new System.Numerics.Vector4(0.95f, 0.25f, 0.25f, 1f));
+                    ImGui.PushStyleColor(ImGuiCol.ButtonActive, new System.Numerics.Vector4(1f, 0.35f, 0.35f, 1f));
+                    ImGui.PushStyleColor(ImGuiCol.Text, new System.Numerics.Vector4(1f, 1f, 1f, 1f));
 
-                // Header for this list — green for Farm, gray for Filler
-                bool divIsFarm = Settings.DivisionRoles.TryGetValue(headers[t], out var divRole) && divRole == "Farm";
-                string divLabel = divIsFarm ? $"{headers[t]} [F]" : $"{headers[t]} [B]";
-                ImGui.PushStyleColor(ImGuiCol.Text, divIsFarm
-                    ? new System.Numerics.Vector4(0.4f, 1f, 0.4f, 1f)
-                    : new System.Numerics.Vector4(0.7f, 0.7f, 0.7f, 1f));
-                ImGui.Text(divLabel);
-                ImGui.PopStyleColor();
+                    string alertText = $"RUN {readyDiv.ToUpper()} SAFEHOUSE NOW - intel 100";
+                    ImGui.Button($"  ***  {alertText}  ***  ###alert_{readyDiv}", new System.Numerics.Vector2(-1, 36));
+
+                    ImGui.PopStyleColor(4);
+                    ImGui.Spacing();
+                }
+            }
+
+            // Main table with 6 dedicated columns: 4 divisions + Outside + Targets
+            if (ImGui.BeginTable("MasterTables", 4, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.Resizable))
+            {
+                ImGui.TableSetupColumn("Transportation", ImGuiTableColumnFlags.WidthStretch, 1.0f);
+                ImGui.TableSetupColumn("Fortification", ImGuiTableColumnFlags.WidthStretch, 1.0f);
+                ImGui.TableSetupColumn("Research", ImGuiTableColumnFlags.WidthStretch, 1.0f);
+                ImGui.TableSetupColumn("Intervention", ImGuiTableColumnFlags.WidthStretch, 1.0f);
+
+                ImGui.TableNextRow();
+
+                // 4 Division columns
+                for (int t = 0; t < allLists.Length; t++)
+                {
+                    ImGui.TableSetColumnIndex(t);
+
+                    bool divIsFarm = Settings.DivisionRoles.TryGetValue(headers[t], out var divRole) && divRole == "Farm";
+                    int divTarget = divIsFarm ? 2 : 5;
+                    var divLeader = allLists[t].FirstOrDefault(m => m.IsLeader);
+                    string divLabel = headers[t];
+                    ImGui.PushStyleColor(ImGuiCol.Text, divIsFarm
+                        ? new System.Numerics.Vector4(0.4f, 1f, 0.4f, 1f)
+                        : new System.Numerics.Vector4(0.7f, 0.7f, 0.7f, 1f));
+                    ImGui.TextUnformatted(divLabel);
+                    ImGui.PopStyleColor();
+                    divIntel.TryGetValue(headers[t], out int intelPct);
+                    ImGui.TextDisabled($"{(divIsFarm ? "FARM" : "FILLER")} {allLists[t].Count}/{divTarget}");
+                    ImGui.ProgressBar(intelPct / 100f, new System.Numerics.Vector2(-1, ImGui.GetTextLineHeight() + 6f), "Intel " + intelPct);
+                    ImGui.Spacing();
+                    ImGui.TextDisabled($"Leader: {divLeader?.Name ?? "?"} (highlighted)");
+                    ImGui.Separator();
+
+                    if (ImGui.BeginTable($"TableDiv_{t}", 3, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp))
+                    {
+                        ImGui.TableSetupColumn("R", ImGuiTableColumnFlags.WidthStretch, 0.45f);
+                        ImGui.TableSetupColumn("Name", ImGuiTableColumnFlags.WidthStretch, 2.0f);
+                        ImGui.TableSetupColumn("Goal", ImGuiTableColumnFlags.WidthStretch, 1.1f);
+                        ImGui.TableHeadersRow();
+
+                        if (allLists[t].Count == 0)
+                        {
+                            ImGui.TableNextRow();
+                            ImGui.TableSetColumnIndex(0);
+                            ImGui.TextDisabled("-");
+                            ImGui.TableSetColumnIndex(1);
+                            ImGui.TextDisabled("(empty)");
+                            ImGui.TableSetColumnIndex(2);
+                            ImGui.TextDisabled("-");
+                        }
+                        else
+                        {
+                            foreach (var master in allLists[t])
+                            {
+                                ImGui.TableNextRow();
+                                if (master.IsLeader)
+                                    ImGui.TableSetBgColor(ImGuiTableBgTarget.RowBg0, ImGui.ColorConvertFloat4ToU32(new System.Numerics.Vector4(0.55f, 0.42f, 0.05f, 0.55f)));
+                                ImGui.TableSetColumnIndex(0);
+                                ImGui.Text($"{master.Rank}");
+
+                                ImGui.TableSetColumnIndex(1);
+                                System.Numerics.Vector4 color;
+                                if (master.Score >= 30)
+                                    color = master.Rank >= 3
+                                        ? new System.Numerics.Vector4(0.1f, 1f, 1f, 1f)     // Ready (Cyan)
+                                        : new System.Numerics.Vector4(0.2f, 1f, 0.3f, 1f);   // Need Rank (Green)
+                                else if (master.Score >= 1)
+                                    color = new System.Numerics.Vector4(0.8f, 0.8f, 0.8f, 1f); // Filler (Light Gray)
+                                else
+                                    color = new System.Numerics.Vector4(1f, 0.3f, 0.3f, 1f);    // Intruder / Misplaced (Red)
+
+                                ImGui.TextColored(color, master.Name);
+
+                                if (ImGui.IsItemHovered())
+                                {
+                                    string roleInfo = master.IsLeader ? "Leader" : "Member";
+                                    string tip = $"{master.Name} ({headers[t]} {roleInfo}, Rank {master.Rank})";
+                                    if (!string.IsNullOrEmpty(master.GoalAction))
+                                        tip += $"\nStatus: {master.GoalAction}";
+                                    if (master.SlotIndex >= 0)
+                                        tip += $"\nBoard Slot #{master.SlotIndex} at ({master.ScreenX:0}, {master.ScreenY:0})";
+                                    ImGui.SetTooltip(tip);
+                                }
+
+                                ImGui.TableSetColumnIndex(2);
+                                if (string.IsNullOrEmpty(master.TargetDivision))
+                                    ImGui.TextDisabled("-");
+                                else if (master.TargetDivision == headers[t])
+                                    ImGui.TextColored(new System.Numerics.Vector4(0.3f, 1f, 0.3f, 1f), "OK");
+                                else
+                                    ImGui.TextColored(new System.Numerics.Vector4(1f, 0.4f, 0.3f, 1f), "> " + master.TargetDivision.Substring(0, 3));
+                            }
+                        }
+
+                        ImGui.EndTable();
+                    }
+                }
+
+                ImGui.EndTable();
+
+                // Second row: Outside + Farm Targets, below the divisions
+                ImGui.Spacing();
+                ImGui.BeginTable("LowerTables", 2, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.Resizable);
+                ImGui.TableSetupColumn("Outside", ImGuiTableColumnFlags.WidthStretch, 1.0f);
+                ImGui.TableSetupColumn("Targets", ImGuiTableColumnFlags.WidthStretch, 1.0f);
+                ImGui.TableNextRow();
+                ImGui.TableSetColumnIndex(0);
+                ImGui.TextUnformatted($"Outside ({outsideMasters.Count})");
                 ImGui.Separator();
 
-                // Child table for this list
-                if (ImGui.BeginTable($"Table{t}", 2, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
+                if (ImGui.BeginTable("TableOutside", 2, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
                 {
-                    ImGui.TableSetupColumn("Rank");
-                    ImGui.TableSetupColumn("Name");
+                    ImGui.TableSetupColumn("Name", ImGuiTableColumnFlags.WidthStretch);
+                    ImGui.TableSetupColumn("Action", ImGuiTableColumnFlags.WidthFixed, 70f);
                     ImGui.TableHeadersRow();
 
-                    foreach (var master in allLists[t])
+                    if (outsideMasters.Count == 0)
                     {
                         ImGui.TableNextRow();
-                        ImGui.TableNextColumn();
-                        ImGui.Text(master.Rank.ToString());
+                        ImGui.TableSetColumnIndex(0);
+                        ImGui.TextDisabled("(none)");
+                        ImGui.TableSetColumnIndex(1);
+                        ImGui.TextDisabled("-");
+                    }
+                    else
+                    {
+                        foreach (var outsideMaster in outsideMasters)
+                        {
+                            ImGui.TableNextRow();
+                            ImGui.TableSetColumnIndex(0);
 
-                        ImGui.TableNextColumn();
+                            bool isFarmTarget = !string.IsNullOrEmpty(outsideMaster.TargetDivision)
+                                && Settings.DivisionRoles.TryGetValue(outsideMaster.TargetDivision, out var tr) && tr == "Farm";
 
-                        System.Numerics.Vector4 color;
-                        if (master.Score >= 30)
-                            color = new System.Numerics.Vector4(0f, 1f, 0f, 1f);       // Bright green: Farm member, correct position
-                        else if (master.Score >= 1)
-                            color = new System.Numerics.Vector4(0.7f, 0.7f, 0.7f, 1f); // Gray: Filler member, OK
-                        else
-                            color = new System.Numerics.Vector4(1f, 0.2f, 0.2f, 1f);   // Red: wrong member for this division
+                            var color = isFarmTarget
+                                ? new System.Numerics.Vector4(1f, 0.6f, 0.1f, 1f)   // Farm target outside (Orange)
+                                : new System.Numerics.Vector4(0.7f, 0.7f, 0.7f, 1f); // Neutral filler (Gray)
 
-                        ImGui.TextColored(color, master.Name);
+                            ImGui.TextColored(color, outsideMaster.Name);
+
+                            if (ImGui.IsItemHovered())
+                            {
+                                string tip = isFarmTarget
+                                    ? $"{outsideMaster.Name} (Farm Target for {outsideMaster.TargetDivision})\nAction: Recruit when appears in encounter"
+                                    : $"{outsideMaster.Name} (Reserve filler)";
+                                ImGui.SetTooltip(tip);
+                            }
+
+                            ImGui.TableSetColumnIndex(1);
+                            if (isFarmTarget)
+                                ImGui.TextColored(color, "Recruit");
+                            else
+                                ImGui.TextDisabled("Reserve");
+                        }
                     }
 
                     ImGui.EndTable();
                 }
 
+                ImGui.TableSetColumnIndex(1);
+                ImGui.TextUnformatted("Farm Targets");
+                ImGui.Separator();
 
-
-            }
-            // for unnalocated
-            ImGui.TableNextColumn();
-
-            // Header for this list
-            ImGui.Text("Outside");
-            ImGui.Separator();
-
-            // Child table for this list
-            if (ImGui.BeginTable($"Table", 2, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
-            {
-                ImGui.TableSetupColumn("Name");
-                ImGui.TableSetupColumn("Action");
-                ImGui.TableHeadersRow();
-
-                foreach (var missingmaster in missingNames)
+                if (ImGui.BeginTable("TableTargets", 2, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
                 {
-                    ImGui.TableNextRow();
+                    ImGui.TableSetupColumn("Target", ImGuiTableColumnFlags.WidthStretch, 1.0f);
+                    ImGui.TableSetupColumn("Status", ImGuiTableColumnFlags.WidthStretch, 1.2f);
+                    ImGui.TableHeadersRow();
 
-                    ImGui.TableNextColumn();
-                    // find if that master should be on the board
-
-                    var auxText = "";
-                    var color = new System.Numerics.Vector4(0f, 1f, 0f, 1f); // Green default
-                    if (_mastersToBePresent.Contains(missingmaster))
+                    if (interestingMasters.Count == 0)
                     {
-                        color = new System.Numerics.Vector4(1f, 0f, 0f, 1f); // Red for master that should be on main board
-                        auxText = "Bring in";
+                        ImGui.TableNextRow();
+                        ImGui.TableSetColumnIndex(0);
+                        ImGui.TextDisabled("(none)");
+                        ImGui.TableSetColumnIndex(1);
+                        ImGui.TextDisabled("-");
+                    }
+                    else
+                    {
+                        foreach (var interestingmaster in interestingMasters)
+                        {
+                            ImGui.TableNextRow();
+                            ImGui.TableSetColumnIndex(0);
+
+                            var master = ListBetrayalMasters.FirstOrDefault(m => m.Name == interestingmaster);
+                            var score = master?.Score ?? 0;
+                            var job = (master == null || master.Job == "None" || string.IsNullOrEmpty(master.Job)) ? "Outside" : master.Job;
+                            var rank = master?.Rank ?? 0;
+                            var targetDiv = master?.TargetDivision ?? "";
+                            if (string.IsNullOrEmpty(targetDiv))
+                            {
+                                targetDiv = Settings.DivisionMembers.FirstOrDefault(kv => kv.Value != null && kv.Value.Contains(interestingmaster)).Key ?? "";
+                            }
+
+                            System.Numerics.Vector4 color;
+                            string statusText;
+                            if (score >= 30)
+                            {
+                                if (rank >= 3)
+                                {
+                                    color = new System.Numerics.Vector4(0.1f, 1f, 1f, 1f);  // Cyan
+                                    statusText = $"{job} R3";
+                                }
+                                else
+                                {
+                                    color = new System.Numerics.Vector4(0.2f, 1f, 0.3f, 1f); // Green
+                                    statusText = $"{job} R{rank}";
+                                }
+                            }
+                            else if (master != null && master.Job != "None" && !string.IsNullOrEmpty(master.Job))
+                            {
+                                color = new System.Numerics.Vector4(1f, 0.3f, 0.3f, 1f);     // Red
+                                statusText = $"{job} (Wrong)";
+                            }
+                            else
+                            {
+                                color = new System.Numerics.Vector4(1f, 0.6f, 0.1f, 1f);     // Orange
+                                statusText = "Outside";
+                            }
+
+                            ImGui.TextColored(color, interestingmaster);
+
+                            if (ImGui.IsItemHovered())
+                            {
+                                string tip = $"Target: {targetDiv}\nCurrent: {job} (Rank {rank})\nAction: {master?.GoalAction ?? "Recruit"}";
+                                ImGui.SetTooltip(tip);
+                            }
+
+                            ImGui.TableSetColumnIndex(1);
+                            ImGui.TextColored(color, statusText);
+                        }
                     }
 
-
-                    ImGui.TextColored(color, missingmaster);
-                    ImGui.TableNextColumn();
-                    ImGui.TextColored(color, auxText);
-
+                    ImGui.EndTable();
                 }
 
                 ImGui.EndTable();
             }
 
-            // for interesting members
-            ImGui.TableNextColumn();
-
-            // Header for this list
-            ImGui.Text("Interesting");
+            ImGui.Spacing();
             ImGui.Separator();
-
-            // Child table for this list
-            if (ImGui.BeginTable($"Table", 2, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
+            if (ImGui.Button("Close", new Vector2N(80, 24)))
             {
-                ImGui.TableSetupColumn("Name");
-                ImGui.TableSetupColumn("Job");
-                ImGui.TableHeadersRow();
-
-                foreach (var interestingmaster in interestingMasters)
-                {
-                    ImGui.TableNextRow();
-
-                    ImGui.TableNextColumn();
-                    // find if that master should be on the board
-
-
-
-                    var interestingMasterAux = ListBetrayalMasters.FirstOrDefault(master => master.Name == interestingmaster);
-                    var interestingMasterScore = interestingMasterAux?.Score ?? 0;
-                    var interestingMasterJob = interestingMasterAux?.Job ?? "Outside!";
-                    //var interestingMasterScore =  0;
-                    //  var interestingMasterJob = "Job";
-
-                    var color = new System.Numerics.Vector4(0f, 1f, 0f, 1f); // Green default
-                    if (interestingMasterScore < 30)
-                    {
-                        color = new System.Numerics.Vector4(1f, 0f, 0f, 1f); // Red for master that should be on main board
-
-                    }
-
-
-                    ImGui.TextColored(color, interestingmaster);
-                    ImGui.TableNextColumn();
-                    ImGui.TextColored(color, interestingMasterJob);
-
-                }
-
-                ImGui.EndTable();
+                _closedOverviewForCurrentPanel = true;
             }
+            ImGui.SameLine();
+            if (ImGui.Button("Refresh Board", new Vector2N(130, 24)))
+            {
+                updateSyndicateInfo();
+            }
+            ImGui.SameLine();
+            ImGui.TextDisabled($"Refresh re-reads the board | {ListBetrayalMasters.Count} members cached");
 
-            ImGui.EndTable();
-            ImGui.Button("Close");
-
+            ImGui.End();
         }
 
         private List<BetrayalMaster> BetrayalEventMembers()
@@ -1044,12 +1500,20 @@ namespace BetrayalHelper
 
             foreach (var entity in entities)
             {
-                var auxmaster = entity.GetComponent<StateMachine>().States.FirstOrDefault(state => state.Name=="NPCIndex");
+                var stateComp = entity.GetComponent<StateMachine>();
+                if (stateComp?.States == null) continue;
+                var auxmaster = stateComp.States.FirstOrDefault(state => state.Name=="NPCIndex");
+                if (auxmaster == null) continue;
                 var npcindex = (int)auxmaster.Value;
+                if (GameController.Files?.BetrayalTargets?.EntriesList == null) continue;
+                if (npcindex < 0 || npcindex >= GameController.Files.BetrayalTargets.EntriesList.Count) continue;
                 var aux = GameController.Files.BetrayalTargets.EntriesList[npcindex];
+                if (aux == null) continue;
                 var aux2 = ListBetrayalMasters.FirstOrDefault(master => master.Name == aux.Name);
                 if (aux2 != null) 
                     masters.Add(aux2);
+                else
+                    masters.Add(new BetrayalMaster(aux.Name, "None", 0, false, new List<string>(), GetScore(aux.Name, "None", 0)));
             }
 
 
@@ -1057,90 +1521,433 @@ namespace BetrayalHelper
         }
         private void updateSyndicateInfo()
         {
-            var ingameState = GameController.Game.IngameState;
-            var syndicatePanel = ingameState.IngameUi.SyndicatePanel;
-            var relationshipMap = ingameState.ServerData.BetrayalMemberRelationships;
+            var ingameState = GameController?.Game?.IngameState;
+            var syndicatePanel = ingameState?.IngameUi?.SyndicatePanel;
+            if (syndicatePanel == null) return;
 
+            var relationshipMap = ingameState?.ServerData?.BetrayalMemberRelationships;
             var liveRelationships = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
-            foreach (var relationshipEntry in relationshipMap)
+            if (relationshipMap != null)
             {
-                if (relationshipEntry.Key?.Name is not { Length: > 0 } memberName || relationshipEntry.Value == null)
-                    continue;
-
-                var memberLinks = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-                foreach (var relation in relationshipEntry.Value)
+                try
                 {
-                    if (relation.Key?.Name is { Length: > 0 } relatedName)
-                        memberLinks[relatedName] = relation.Value.ToString();
+                    foreach (var relationshipEntry in relationshipMap)
+                    {
+                        if (relationshipEntry.Key?.Name is not { Length: > 0 } memberName || relationshipEntry.Value == null)
+                            continue;
+
+                        var memberLinks = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                        foreach (var relation in relationshipEntry.Value)
+                        {
+                            if (relation.Key?.Name is { Length: > 0 } relatedName)
+                                memberLinks[relatedName] = relation.Value.ToString();
+                        }
+                        liveRelationships[memberName] = memberLinks;
+                    }
                 }
-                liveRelationships[memberName] = memberLinks;
+                catch { }
             }
 
-            ListBetrayalMasters.Clear();
+            var newMasters = new List<BetrayalMaster>();
+            var mem = GameController.Memory;
 
-            //foreach (var singleState in syndicateStates)
-
-            // check if betrayal event is on
-
-            var syndicateStates = syndicatePanel.SyndicateStates;
-
-            for (int i = 0; i < syndicateStates.Count; i++)
+            // Direct Memory Reader for Immortal Syndicate States (offset 0x3F8 / 0x400 in SyndicatePanel)
+            try
             {
-                var singleState = syndicateStates[i];
-                var masterTest = singleState.UIElement.GetChildFromIndices(3, 0);
-                var rank = singleState.Rank.RankInt;
+                long panelAddr = syndicatePanel.Address;
+                if (panelAddr != 0 && mem != null)
+                {
+                    long statesStart = mem.Read<long>(panelAddr + 0x3F8);
+                    long statesEnd = mem.Read<long>(panelAddr + 0x400);
+                    if (statesEnd > statesStart && (statesEnd - statesStart) % 160 == 0)
+                    {
+                        int stateCount = (int)((statesEnd - statesStart) / 160);
+                        for (int i = 0; i < stateCount; i++)
+                        {
+                            long stateAddr = statesStart + i * 160;
+                            long targetPtr = mem.Read<long>(stateAddr + 0x08);
+                            long jobPtr = mem.Read<long>(stateAddr + 0x18);
+                            long rankPtr = mem.Read<long>(stateAddr + 0x28);
 
+                            long namePtr = targetPtr != 0 ? mem.Read<long>(targetPtr) : 0;
+                            string name = namePtr != 0 ? mem.ReadStringU(namePtr) : "";
+                            if (name.Equals("ItThatFled", StringComparison.OrdinalIgnoreCase))
+                                name = "It That Fled";
 
+                            long jobNamePtr = jobPtr != 0 ? mem.Read<long>(jobPtr + 0x08) : 0;
+                            string job = jobNamePtr != 0 ? mem.ReadStringU(jobNamePtr) : "None";
 
-                string[] parts = singleState.ToString().Split(',');
-                var name = parts[0].Trim();
-                var jobDescription = parts[1].Trim();
-                var job = parts[2].Trim();
-                
+                            int rank = rankPtr != 0 ? mem.Read<int>(rankPtr + 0x10) : 0;
+                            bool isLeader = i < 4;
 
-                var typedRelationships = liveRelationships.TryGetValue(name, out var savedRelationships)
-                    ? new Dictionary<string, string>(savedRelationships, StringComparer.OrdinalIgnoreCase)
-                    : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-                List<string> stateNames = typedRelationships.Keys.ToList();
+                            if (string.IsNullOrEmpty(name) || !allMasters.Contains(name))
+                                continue;
 
-                bool isLeader = i < 4;
-                int score = GetScore(name, job, rank);
-                BetrayalMaster betrayalMaster = new BetrayalMaster(name, job, rank, isLeader, stateNames, score);
-                betrayalMaster.RelationshipStatuses = typedRelationships;
+                            var typedRelationships = liveRelationships.TryGetValue(name, out var savedRelationships)
+                                ? new Dictionary<string, string>(savedRelationships, StringComparer.OrdinalIgnoreCase)
+                                : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
-                if (Settings.MegaDebugMode)
-                    LogMessage(betrayalMaster.ToString(), 5, Color.Red);
-                ListBetrayalMasters.Add(betrayalMaster);
+                            if (typedRelationships.Count == 0)
+                            {
+                                try
+                                {
+                                    long relStart = mem.Read<long>(stateAddr + 0x50);
+                                    long relEnd = mem.Read<long>(stateAddr + 0x58);
+                                    if (relEnd > relStart && (relEnd - relStart) % 8 == 0)
+                                    {
+                                        int relCount = (int)((relEnd - relStart) / 8);
+                                        for (int r = 0; r < relCount && r < 20; r++)
+                                        {
+                                            long otherState = mem.Read<long>(relStart + r * 8);
+                                            if (otherState != 0)
+                                            {
+                                                long otherTarget = mem.Read<long>(otherState + 0x08);
+                                                long otherNamePtr = otherTarget != 0 ? mem.Read<long>(otherTarget) : 0;
+                                                string otherName = otherNamePtr != 0 ? mem.ReadStringU(otherNamePtr) : "";
+                                                if (otherName.Equals("ItThatFled", StringComparison.OrdinalIgnoreCase))
+                                                    otherName = "It That Fled";
 
+                                                if (!string.IsNullOrEmpty(otherName) && allMasters.Contains(otherName) && !typedRelationships.ContainsKey(otherName))
+                                                {
+                                                    typedRelationships[otherName] = "Neutral";
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                catch { }
+                            }
 
+                            List<string> stateNames = typedRelationships.Keys.ToList();
+                            int score = GetScore(name, job, rank);
+                            var betrayalMaster = new BetrayalMaster(name, job, rank, isLeader, stateNames, score)
+                            {
+                                SlotIndex = i
+                            };
+                            betrayalMaster.RelationshipStatuses = typedRelationships;
+                            UpdateMasterGoalStatus(betrayalMaster);
+
+                            if (Settings.MegaDebugMode)
+                                LogMessage(betrayalMaster.ToString(), 5, Color.Red);
+
+                            newMasters.Add(betrayalMaster);
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                if (Settings.DebugMode)
+                    LogMessage($"Memory syndicate parse error: {ex.Message}", 5, Color.Red);
             }
 
+            ExileCore.PoEMemory.Element boardContainer = null;
 
-            List<string> missingMastersFromBoard = allMasters.Except(ListBetrayalMasters.Select(b => b.Name)).ToList();
+            // Fallback UI-tree parser ONLY if direct memory reading completely failed (0 masters)
+            if (newMasters.Count == 0)
+            {
+                newMasters.Clear();
+                try
+                {
+                    if (ingameState?.IngameUi?.Children != null)
+                    {
+                        long panelAddr = syndicatePanel.Address;
+                        foreach (var uiChild in ingameState.IngameUi.Children)
+                        {
+                            if (uiChild != null && uiChild.Address == panelAddr && uiChild.Children?.Count > 0)
+                            {
+                                boardContainer = uiChild.Children[0];
+                                break;
+                            }
+                        }
+                    }
+                    boardContainer ??= syndicatePanel.Children?.Count > 0 ? syndicatePanel.Children[0] : null;
 
-            _missingMastersFromBoard = allMasters
-              .Except(ListBetrayalMasters.Select(b => b.Name))
-              .ToList();
+                    if (boardContainer != null && boardContainer.Children?.Count > 0)
+                    {
+                        var rawCards = new List<(string Name, float X, float Y, float Width, int Rank, bool InDivision, bool HasLeaderFrame, int SlotIndex)>();
+                        var boardRect = boardContainer.GetClientRectCache;
+                        float boardLeft = boardRect.X;
+                        float boardTop = boardRect.Y;
+                        float boardWidth = boardRect.Width;
+                        float boardHeight = boardRect.Height;
 
-            _mastersToBePresent = GetRequiredMemberDivisions()
-                .SelectMany(kv => kv.Value)
-                .Distinct()
-                .ToList();
+                        for (int c = 0; c < boardContainer.Children.Count; c++)
+                        {
+                            var card = boardContainer.Children[c];
+                            if (card == null || !card.IsValid) continue;
 
+                            string name = "";
+                            try
+                            {
+                                if (card.Children.Count > 3 && card.Children[3].Children.Count > 0)
+                                    name = card.Children[3].Children[0].Text?.Trim() ?? "";
+                                if (string.IsNullOrEmpty(name) && card.Children.Count > 3)
+                                    name = card.Children[3].Text?.Trim() ?? "";
+                            }
+                            catch { }
+
+                            // Robust fallback search through children if name wasn't at [3][0]
+                            if (string.IsNullOrEmpty(name) || !allMasters.Contains(name))
+                            {
+                                foreach (var sub in card.Children)
+                                {
+                                    var t = sub?.Text?.Trim();
+                                    if (!string.IsNullOrEmpty(t) && allMasters.Contains(t)) { name = t; break; }
+                                    if (sub?.Children != null)
+                                    {
+                                        foreach (var sub2 in sub.Children)
+                                        {
+                                            var t2 = sub2?.Text?.Trim();
+                                            if (!string.IsNullOrEmpty(t2) && allMasters.Contains(t2)) { name = t2; break; }
+                                        }
+                                        if (!string.IsNullOrEmpty(name)) break;
+                                    }
+                                }
+                            }
+
+                            if (string.IsNullOrEmpty(name) || name.Equals("Catarina", StringComparison.OrdinalIgnoreCase) || !allMasters.Contains(name))
+                                continue;
+
+                            // Local position inside board container
+                            float posX = 0, posY = 0, width = 0;
+                            try
+                            {
+                                var pos = card.Position;
+                                posX = pos.X;
+                                posY = pos.Y;
+                                width = card.Width;
+                            }
+                            catch { }
+
+                            // Screen center position for percentage calculations
+                            float screenX = posX, screenY = posY;
+                            try
+                            {
+                                var rect = card.GetClientRectCache;
+                                if (rect.Width > 0)
+                                {
+                                    screenX = rect.Center.X;
+                                    screenY = rect.Center.Y;
+                                    if (width <= 0) width = rect.Width;
+                                }
+                            }
+                            catch { }
+
+                            // Leaders have a larger frame (width ~324px vs ~283.5px for members) or Child[2] frame
+                            bool hasLeaderFrame = (width > 300 && width < 345);
+                            try
+                            {
+                                if (card.Children.Count > 2 && (card.Children[2].IsVisible || card.Children[2].IsVisibleLocal))
+                                    hasLeaderFrame = true;
+                            }
+                            catch { }
+
+                            // Detect rank directly from Child[6..18] stars
+                            int rank = 0;
+                            try
+                            {
+                                int maxStarIdx = -1;
+                                for (int s = 6; s <= 18 && s < card.Children.Count; s++)
+                                {
+                                    if (card.Children[s].IsVisible || card.Children[s].IsVisibleLocal)
+                                        maxStarIdx = s;
+                                }
+                                if (maxStarIdx >= 16) rank = 3;
+                                else if (maxStarIdx >= 12) rank = 2;
+                                else if (maxStarIdx >= 6) rank = 1;
+                                else if (card.Children.Count > 5 && card.Children[5].Children.Count > 0)
+                                    rank = Math.Clamp(card.Children[5].Children.Count, 1, 3);
+                            }
+                            catch { }
+
+                            // Division detection: board members have posY < 1750 or screen relative Y < 0.75
+                            bool inDivision = false;
+                            if (posY > 0 && posY < 1750) inDivision = true;
+                            else if (boardHeight > 0 && screenY > boardTop && (screenY - boardTop) / boardHeight < 0.75f) inDivision = true;
+
+                            try
+                            {
+                                if (card.Children.Count > 4 && (card.Children[4].IsVisible || card.Children[4].IsVisibleLocal)) inDivision = true;
+                                if (card.Children.Count > 19 && (card.Children[19].IsVisible || card.Children[19].IsVisibleLocal)) inDivision = true;
+                            }
+                            catch { }
+
+                            if (rank > 0) inDivision = true;
+                            if (posY >= 1750 && rank == 0) inDivision = false;
+                            if (inDivision && rank == 0) rank = 1;
+
+                            rawCards.Add((name, posX, posY, width, rank, inDivision, hasLeaderFrame, c));
+                        }
+
+                        // Check active encounter event for live precision (NPC name, job, rank)
+                        var eventElement = syndicatePanel.EventElement ?? syndicatePanel.BetrayalEventData;
+                        string eventNpcName = "";
+                        string eventNpcJob = "";
+                        int eventNpcRank = -1;
+                        if (eventElement != null && (eventElement.IsVisible || eventElement.IsVisibleLocal))
+                        {
+                            try { eventNpcName = eventElement.Target2?.Name ?? ""; } catch { }
+                            try
+                            {
+                                if (eventElement.Children.Count > 4 && eventElement.Children[4].Children.Count > 6)
+                                {
+                                    var cardElem = eventElement.Children[4];
+                                    if (string.IsNullOrEmpty(eventNpcName))
+                                        eventNpcName = cardElem.Children[4]?.Text?.Trim() ?? "";
+
+                                    var textElem = cardElem.Children[6].Children.Count > 0 ? cardElem.Children[6].Children[0] : cardElem.Children[6];
+                                    var lines = (textElem?.Text ?? "").Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+                                    foreach (var line in lines)
+                                    {
+                                        var l = line.Trim();
+                                        if (l.Equals("Transportation", StringComparison.OrdinalIgnoreCase) ||
+                                            l.Equals("Fortification", StringComparison.OrdinalIgnoreCase) ||
+                                            l.Equals("Research", StringComparison.OrdinalIgnoreCase) ||
+                                            l.Equals("Intervention", StringComparison.OrdinalIgnoreCase))
+                                        {
+                                            eventNpcJob = l;
+                                        }
+                                        else if (l.IndexOf("Sergeant", StringComparison.OrdinalIgnoreCase) >= 0) eventNpcRank = 1;
+                                        else if (l.IndexOf("Lieutenant", StringComparison.OrdinalIgnoreCase) >= 0) eventNpcRank = 2;
+                                        else if (l.IndexOf("Captain", StringComparison.OrdinalIgnoreCase) >= 0) eventNpcRank = 3;
+                                    }
+                                }
+                            }
+                            catch { }
+                        }
+
+                        var divisionMembers = new Dictionary<string, List<(string Name, float X, float Y, float Width, int Rank, bool InDivision, bool HasLeaderFrame, int SlotIndex)>>(StringComparer.OrdinalIgnoreCase)
+                        {
+                            ["Transportation"] = new(),
+                            ["Fortification"] = new(),
+                            ["Research"] = new(),
+                            ["Intervention"] = new(),
+                            ["None"] = new()
+                        };
+
+                        foreach (var card in rawCards)
+                        {
+                            string div = "None";
+                            if (card.InDivision && card.Y < 1750)
+                            {
+                                // 2x2 Quadrant layout on the Syndicate board:
+                                // Left side (X < 2100):
+                                //   Top:    Fortification (Y < 1200)
+                                //   Bottom: Transportation (Y >= 1200)
+                                // Right side (X >= 2100):
+                                //   Top-inner: Research (Y < 1150 && X < 3300)
+                                //   Outer/bot: Intervention
+                                if (card.X < 2100)
+                                {
+                                    div = card.Y < 1200 ? "Fortification" : "Transportation";
+                                }
+                                else
+                                {
+                                    div = (card.Y < 1150 && card.X < 3300) ? "Research" : "Intervention";
+                                }
+                            }
+
+                            if (!string.IsNullOrEmpty(eventNpcName) && card.Name.Equals(eventNpcName, StringComparison.OrdinalIgnoreCase) && !string.IsNullOrEmpty(eventNpcJob))
+                            {
+                                div = eventNpcJob;
+                            }
+
+                            divisionMembers[div].Add(card);
+                        }
+
+                        foreach (var kvp in divisionMembers)
+                        {
+                            string divName = kvp.Key;
+                            var membersInDiv = kvp.Value;
+                            if (membersInDiv.Count == 0) continue;
+
+                            var sorted = membersInDiv.OrderBy(m => m.Y).ToList();
+                            string leaderName = "";
+                            if (divName != "None")
+                            {
+                                var leaderCandidate = sorted.FirstOrDefault(m => m.HasLeaderFrame);
+                                leaderName = !string.IsNullOrEmpty(leaderCandidate.Name) ? leaderCandidate.Name : sorted[0].Name;
+                            }
+
+                            foreach (var m in sorted)
+                            {
+                                int rank = m.Rank;
+                                if (!string.IsNullOrEmpty(eventNpcName) && m.Name.Equals(eventNpcName, StringComparison.OrdinalIgnoreCase) && eventNpcRank >= 0)
+                                {
+                                    rank = eventNpcRank;
+                                }
+
+                                bool isLeader = divName != "None" && m.Name.Equals(leaderName, StringComparison.OrdinalIgnoreCase);
+
+                                var typedRelationships = liveRelationships.TryGetValue(m.Name, out var savedRelationships)
+                                    ? new Dictionary<string, string>(savedRelationships, StringComparer.OrdinalIgnoreCase)
+                                    : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+                                List<string> stateNames = typedRelationships.Keys.ToList();
+                                int score = GetScore(m.Name, divName, rank);
+                                var betrayalMaster = new BetrayalMaster(m.Name, divName, rank, isLeader, stateNames, score)
+                                {
+                                    SlotIndex = m.SlotIndex,
+                                    ScreenX = m.X,
+                                    ScreenY = m.Y,
+                                    Width = m.Width
+                                };
+                                betrayalMaster.RelationshipStatuses = typedRelationships;
+                                UpdateMasterGoalStatus(betrayalMaster);
+
+                                if (Settings.MegaDebugMode)
+                                    LogMessage(betrayalMaster.ToString(), 5, Color.Red);
+
+                                newMasters.Add(betrayalMaster);
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    if (Settings.DebugMode)
+                        LogMessage($"UI syndicate parse error: {ex.Message}", 5, Color.Red);
+                }
+            }
+
+            if (newMasters.Count > 0)
+            {
+                ListBetrayalMasters = newMasters;
+
+                _missingMastersFromBoard = ListBetrayalMasters
+                    .Where(b => b.Job == "None" || string.IsNullOrEmpty(b.Job))
+                    .Select(b => b.Name)
+                    .ToList();
+
+                _mastersToBePresent = GetRequiredMemberDivisions()
+                    .SelectMany(kv => kv.Value)
+                    .Distinct()
+                    .ToList();
+
+                UpdateReadySafehouses(boardContainer);
+            }
         }
 
         private void DrawSyndicateBoard(SyndicatePanel syndicatePanel)
         {
-
             updateSyndicateInfo();
-            //DrawBottomBoard();
             DrawBottomBoardGui();
 
+            BetrayalEventData? eventData = null;
+            try
+            {
+                eventData = syndicatePanel.EventElement ?? syndicatePanel.BetrayalEventData;
+            }
+            catch
+            {
+                eventData = null;
+            }
 
-            if (syndicatePanel.BetrayalEventData is not null)
+            if (eventData is not null)
             {
 
-                if (syndicatePanel.BetrayalEventData.IsVisible)
+                if (eventData.IsVisible)
                 {
                     // we got an event
 
@@ -1150,31 +1957,54 @@ namespace BetrayalHelper
 
                     // swap
 
-
-
-
-
-                    _eventAction = syndicatePanel.BetrayalEventData.Action.Id;
+                    _eventAction = eventData.Action?.Id ?? "Unknown";
                     // ExileCore can expose the choice action one frame before its text
                     // element is populated. Keep parser calls safe during that transition.
-                    _eventText = syndicatePanel.BetrayalEventData.EventText ?? string.Empty;
+                    _eventText = eventData.EventText ?? string.Empty;
                     NormalizePreviewedRelationshipState();
-                    try { _jobEvent = syndicatePanel.BetrayalEventData.CurrentEncounterJob.Name; }
+                    try { _jobEvent = eventData.CurrentEncounterJob?.Name ?? "Unknown"; }
                     catch { _jobEvent = "Unknown"; }
-                    _SpecialButton = syndicatePanel.BetrayalEventData.SpecialButton.GetClientRectCache;
-                    _ReleaseButton = syndicatePanel.BetrayalEventData.ReleaseButton.GetClientRectCache;
-                    _InterrogateButton = syndicatePanel.BetrayalEventData.InterrogateButton.GetClientRectCache;
 
-                    // children
+                    if (string.IsNullOrEmpty(_jobEvent) || _jobEvent == "Unknown")
+                    {
+                        try
+                        {
+                            if (eventData.Children.Count > 4 && eventData.Children[4].Children.Count > 6)
+                            {
+                                var textElem = eventData.Children[4].Children[6].Children.Count > 0 ? eventData.Children[4].Children[6].Children[0] : eventData.Children[4].Children[6];
+                                var lines = (textElem?.Text ?? "").Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+                                foreach (var line in lines)
+                                {
+                                    var l = line.Trim();
+                                    if (l.Equals("Transportation", StringComparison.OrdinalIgnoreCase) ||
+                                        l.Equals("Fortification", StringComparison.OrdinalIgnoreCase) ||
+                                        l.Equals("Research", StringComparison.OrdinalIgnoreCase) ||
+                                        l.Equals("Intervention", StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        _jobEvent = l;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        catch { }
+                    }
+                    _SpecialButton = eventData.SpecialButton?.GetClientRectCache ?? RectangleF.Empty;
+                    _ReleaseButton = eventData.ReleaseButton?.GetClientRectCache ?? RectangleF.Empty;
+                    _InterrogateButton = eventData.InterrogateButton?.GetClientRectCache ?? RectangleF.Empty;
 
-
-
-                    // 4
-
-                    // get the name of the current
-
-                    var masterPanel = syndicatePanel.BetrayalEventData.GetChildAtIndex(4);
-                    _masterText = masterPanel.GetChildAtIndex(4).Text;
+                    // get the name of the current master
+                    string masterName = eventData.Target2?.Name;
+                    if (string.IsNullOrEmpty(masterName))
+                    {
+                        try
+                        {
+                            var masterPanel = eventData.GetChildAtIndex(4);
+                            masterName = masterPanel?.GetChildAtIndex(4)?.Text ?? masterPanel?.Text;
+                        }
+                        catch {}
+                    }
+                    _masterText = masterName ?? "Unknown";
 
                     if (Settings.DebugMode)
                     {
@@ -1187,9 +2017,15 @@ namespace BetrayalHelper
                     _eventMaster = ListBetrayalMasters.FirstOrDefault(master => master.Name == _masterText);
                     if (_eventMaster == null)
                     {
+                        int fallbackScore = GetScore(_masterText, "None", 0);
+                        _eventMaster = new BetrayalMaster(_masterText, "None", 0, false, new List<string>(), fallbackScore);
                         if (Settings.DebugMode)
-                            LogMessage($"DrawSyndicateBoard: master '{_masterText}' not found in ListBetrayalMasters — skipping event", 5, Color.Red);
-                        return;
+                            LogMessage($"DrawSyndicateBoard: master '{_masterText}' not found in ListBetrayalMasters — using unallocated fallback (score {fallbackScore})", 5, Color.Yellow);
+                    }
+
+                    if ((string.IsNullOrEmpty(_jobEvent) || _jobEvent == "Unknown") && _eventMaster != null && _eventMaster.Job != "None")
+                    {
+                        _jobEvent = _eventMaster.Job;
                     }
 
                     // In CatarinaFocus mode: ALL divisions should gain intelligence (run every safehouse)
@@ -1304,81 +2140,75 @@ namespace BetrayalHelper
 
                     List<Outcome> _eventOutcomes = new List<Outcome>();
 
-                    // handle interrogation outcomes
+                    // Release baseline
+                    _eventOutcomes.Add(new Outcome(OutcomeType.Nothing, ActionType.Release, 0, "Release"));
 
-
-                    _eventOutcomes.Add(new Outcome(OutcomeType.Nothing, ActionType.Release, 0, $"Release"));
-
-                    if (!masterHasInterestOnJob && isJobOfInterest && noSpaceForThisMaster && _jobEvent == _eventMaster.Job && _eventMaster.Job != "None")
-
+                    // Comprehensive Interrogation Evaluation:
+                    if (_eventMaster.Job != "None" && !string.IsNullOrEmpty(_eventMaster.Job))
                     {
-                        _eventOutcomes.Add(new Outcome(OutcomeType.RemoveBadMemberFromInterestingJobAndNeedSpace, ActionType.Interrogate, 50, $"{_eventMaster.Name} is going to get demoted "));
-                                              
-
-                        //Graphics.DrawFrame(_InterrogateButton, Color.Green, 6);
-                        if (Settings.DebugMode)
-                        {
-                            LogMessage("This master has no interest on this job and space is needed for others: " + string.Join(", ", mastersWithThisJobAsInterest), 5, Color.Yellow);
-                        }
-                    }
-
-                    if (_eventMaster.Job != "None")
+                        // 1. General strategic interrogation outcome (intel gain, network absence, Unbreaking scarabs)
                         AddInterrogationStrategyOutcome(_eventOutcomes, _eventMaster);
-                    else if (_eventMaster.Job != "None")
-                    {
-                        if (_eventMaster.Score >= 30)
+
+                        // 2. Goal-oriented placement scoring for Interrogate:
+                        if (_eventMaster.Score < 0)
                         {
-                            // Farm member in correct position — neutral base (StealIntelligence adds +80/+60 bonus)
-                            // In Catarina mode: interrogating a high-rank Farm member is BAD (loses rank on someone important!)
-                            int farmInterrogateScore = 0;
-                            if (Settings.FarmingMode == FarmingMode.CatarinaFocus && _eventMaster.Rank >= 2)
-                                farmInterrogateScore = -40; // Don't derank your good members!
-                            _eventOutcomes.Add(new Outcome(OutcomeType.GainInformationToInterestingJob, ActionType.Interrogate, farmInterrogateScore,
-                                $"{_eventMaster.Name} farm member in correct position (rank {_eventMaster.Rank})"));
+                            // Misplaced member or intruder in Farm division!
+                            // Interrogating is CRITICAL to demote them to Rank 0 / Outside so our farm targets can enter!
+                            int intruderInterrogateScore = 150;
+                            _eventOutcomes.Add(new Outcome(
+                                OutcomeType.RemoveBadMemberFromBadJob,
+                                ActionType.Interrogate,
+                                intruderInterrogateScore,
+                                $"{_eventMaster.Name} is MISPLACED / INTRUDER in {_eventMaster.Job} — INTERROGATE to kick out of division!"));
+                        }
+                        else if (_eventMaster.Score >= 30)
+                        {
+                            // Valuable target Farm member in correct division!
+                            if (Settings.FarmingMode == FarmingMode.CatarinaFocus)
+                            {
+                                int farmCatarinaScore = _eventMaster.Rank >= 3 ? -20 : -40;
+                                _eventOutcomes.Add(new Outcome(
+                                    OutcomeType.GainInformationToInterestingJob,
+                                    ActionType.Interrogate,
+                                    farmCatarinaScore,
+                                    $"{_eventMaster.Name} is a valuable Farm member (Rank {_eventMaster.Rank}) — prefer executing to build rank"));
+                            }
+                            else
+                            {
+                                // SafehouseRewards: NEVER derank your cash cows!
+                                _eventOutcomes.Add(new Outcome(
+                                    OutcomeType.GainInformationToInterestingJob,
+                                    ActionType.Interrogate,
+                                    -150,
+                                    $"{_eventMaster.Name} is CORRECTLY PLACED Farm target (Rank {_eventMaster.Rank}) — DO NOT INTERROGATE / DERANK!"));
+                            }
                         }
                         else if (_eventMaster.Score >= 1)
                         {
-                            // Filler member in Filler division — neutral (gives intel, no harm)
-                            _eventOutcomes.Add(new Outcome(OutcomeType.GainInformationToInterestingJob, ActionType.Interrogate, 0,
-                                $"{_eventMaster.Name} filler member, neutral to interrogate"));
-                        }
-                        else
-                        {
-                            // Wrong placement (score=-1) — interrogate to clear the position
-                            _eventOutcomes.Add(new Outcome(OutcomeType.RemoveBadMemberFromBadJob, ActionType.Interrogate, 50,
-                                $"{_eventMaster.Name} wrong position — Interrogate to remove"));
-                        }
-
-                        // In Catarina mode: interrogation gives intel proportional to member rank
-                        // Rank 3 = ~6 intel/turn × 3 turns = 18 total (GREAT!)
-                        // Rank 1 = ~1-2 intel/turn × 3 turns = 3-6 total (WASTE - better to Execute first!)
-                        // So: only recommend Interrogate on high rank members
-                        if (Settings.FarmingMode == FarmingMode.CatarinaFocus && _eventMaster.Score < 30)
-                        {
-                            int interrogateRankBonus;
-                            if (_eventMaster.Rank >= 3)
-                                interrogateRankBonus = 50; // High rank = lots of intel, worth it!
-                            else if (_eventMaster.Rank == 2)
-                                interrogateRankBonus = 10; // Mediocre — Execute would be better to build rank first
-                            else
-                                interrogateRankBonus = -20; // Low rank = waste — Execute to build rank, interrogate later!
-                            _eventOutcomes.Add(new Outcome(OutcomeType.GainInformationToInterestingJob, ActionType.Interrogate, interrogateRankBonus,
-                                $"Catarina mode: interrogate rank {_eventMaster.Rank} → {(interrogateRankBonus > 0 ? "GOOD intel" : "low intel, build rank first!")}"));
+                            // Filler member in Filler division
+                            if (Settings.FarmingMode == FarmingMode.CatarinaFocus)
+                            {
+                                int interrogateRankBonus = _eventMaster.Rank >= 3 ? 50 : _eventMaster.Rank == 2 ? 15 : -20;
+                                _eventOutcomes.Add(new Outcome(
+                                    OutcomeType.GainInformationToInterestingJob,
+                                    ActionType.Interrogate,
+                                    interrogateRankBonus,
+                                    $"Catarina mode: interrogate Rank {_eventMaster.Rank} → {(interrogateRankBonus > 0 ? "HIGH intel" : "low intel, build rank first")}"));
+                            }
                         }
                     }
                     else
                     {
-                        // Member has no job (rank 0) — interrogation gives minimal intel
+                        // Outside / Free Agent (Rank 0, no job)
                         if (Settings.FarmingMode == FarmingMode.CatarinaFocus)
                         {
-                            // Rank 0 interrogation = barely any intel — not worth it, Execute to assign + rank up
-                            _eventOutcomes.Add(new Outcome(OutcomeType.GainInformationToInterestingJob, ActionType.Interrogate, -10,
-                                $"{_eventMaster.Name} no job, rank 0 — interrogate gives almost no intel"));
+                            _eventOutcomes.Add(new Outcome(OutcomeType.GainInformationToInterestingJob, ActionType.Interrogate, -15,
+                                $"{_eventMaster.Name} has no job (Rank 0) — minimal intel, prefer execute/assign"));
                         }
                         else
                         {
                             _eventOutcomes.Add(new Outcome(OutcomeType.RemoveBadMemberFromBadJob, ActionType.Interrogate, -50,
-                                $"{_eventMaster.Name} he has no job so there is no point interrogating him"));
+                                $"{_eventMaster.Name} has no job / rank 0 — cannot remove from any division"));
                         }
                     }
                     //else
@@ -1518,6 +2348,10 @@ namespace BetrayalHelper
                                         _eventOutcomes.Add(new Outcome(OutcomeType.AddGoodMemberToBadJob, ActionType.Special, 100, $"{_eventMaster.Name} who is GOOD gets added to INTERESTING job "));
 
                                     }
+                                    else if (potentialScore < 0)
+                                    {
+                                        _eventOutcomes.Add(new Outcome(OutcomeType.AddBadMemberToInterestingJob, ActionType.Special, -100, $"{_eventMaster.Name} is not wanted in {jobToMove} "));
+                                    }
 
                                 }
                                 else
@@ -1528,49 +2362,35 @@ namespace BetrayalHelper
                                     int gainedRanks = Math.Max(0, resultingRank - _eventMaster.Rank);
                                     int promoteScore;
                                     if (executeNoEffect)
-                                        promoteScore = 0;
+                                        promoteScore = 5;
                                     else
-                                        promoteScore = 25 * gainedRanks;
+                                        promoteScore = 80 * gainedRanks;
                                     _eventOutcomes.Add(new Outcome(OutcomeType.PromoteGoodMemberInInterestingJob, ActionType.Special, promoteScore,
                                         $"{_eventMaster.Name} R{_eventMaster.Rank} -> R{resultingRank}{(executeNoEffect ? " (NO EFFECT)" : "")}"));
                                     AddExecuteIntelligenceOutcome(_eventOutcomes, _eventMaster.Job, resultingRank);
-
-
-                                    //Graphics.DrawFrame(_SpecialButton, Color.Green, 6);
                                 }
-
                                 else if (_eventMaster.Score == 1)
                                 {
-                                    //Graphics.DrawFrame(_ReleaseButton, Color.Yellow, 6);
                                     if (executeNoEffect)
                                     {
                                         _eventOutcomes.Add(new Outcome(OutcomeType.PromoteBadMemberInBadJob, ActionType.Special, 0, $"{_eventMaster.Name} execute has no effect (max rank)"));
                                     }
                                     else if (isJobOfInterest)
                                     {
-                                        _eventOutcomes.Add(new Outcome(OutcomeType.PromoteBadMemberInInterestingJob, ActionType.Special, -100, $"{_eventMaster.Name} who is bad and is on interesting job gets promoted "));
-
+                                        _eventOutcomes.Add(new Outcome(OutcomeType.PromoteBadMemberInInterestingJob, ActionType.Special, -150, $"{_eventMaster.Name} is unwanted in Farm division — DO NOT PROMOTE"));
                                     }
                                     else
                                     {
-                                        // filler on filler division — promoting builds rank for future interrogation intel
-                                        // In Catarina mode: higher rank = more intel from future interrogation (rank 3 = 6/turn!)
-                                        // Plus Lethal Extraction gives immediate intel = 2×rank
                                         int resultingRank = GetRankAfterExecute(_eventMaster.Rank);
-                                        int fillerPromoteScore = Settings.FarmingMode == FarmingMode.CatarinaFocus ? 35 : 5;
+                                        int fillerPromoteScore = Settings.FarmingMode == FarmingMode.CatarinaFocus ? 40 : 15;
                                         _eventOutcomes.Add(new Outcome(OutcomeType.PromoteBadMemberInBadJob, ActionType.Special, fillerPromoteScore,
-                                            $"{_eventMaster.Name} filler promote — builds rank for future intel (Catarina: Lethal Extraction + future interrogation)"));
+                                            $"{_eventMaster.Name} filler promote — builds rank for intel / encounters"));
                                         AddExecuteIntelligenceOutcome(_eventOutcomes, _eventMaster.Job, resultingRank);
                                     }
-                                    
-
                                 }
                                 else
-
-
                                 {
-                                    _eventOutcomes.Add(new Outcome(OutcomeType.PromoteGoodMemberInBadJob, ActionType.Special, -100, $"{_eventMaster.Name} who is good and is on bad job gets promoted "));
-
+                                    _eventOutcomes.Add(new Outcome(OutcomeType.PromoteGoodMemberInBadJob, ActionType.Special, -150, $"{_eventMaster.Name} misplaced / intruder — NEVER execute!"));
                                 }
 
 
@@ -1852,7 +2672,7 @@ namespace BetrayalHelper
             if (_eventAction == "NPCLeavesOrg")
             {
 
-                Match match = Regex.Match(_eventText, @"(.+?)\s+removed from the Immortal Syndicate");
+                Match match = Regex.Match(_eventText, @"(.+?)\s+(?:is\s+removed|leaves|removed)\s+(?:from\s+)?the Immortal Syndicate", RegexOptions.IgnoreCase);
 
                 if (match.Success)
                 {
@@ -1925,7 +2745,7 @@ namespace BetrayalHelper
             if (_eventAction == "RemoveNPCFromOrg")
             {
 
-                Match match = Regex.Match(_eventText, @"(.+?)\s+removed from the Immortal Syndicate");
+                Match match = Regex.Match(_eventText, @"(.+?)\s+(?:is\s+removed|leaves|removed)\s+(?:from\s+)?the Immortal Syndicate", RegexOptions.IgnoreCase);
 
                 if (match.Success)
                 {
@@ -2424,111 +3244,46 @@ namespace BetrayalHelper
         }
         private List<Outcome> EventSwap(SyndicatePanel syndicatePanel)
         {
-            var _eventText = syndicatePanel.BetrayalEventData.EventText;
+            var eventData = syndicatePanel.EventElement ?? syndicatePanel.BetrayalEventData;
+            if (eventData == null) return new List<Outcome>();
+            var _eventText = eventData.EventText ?? string.Empty;
             string pattern = @"([A-Za-z]+(?: [A-Za-z]+)*)\s+moves\s+to\s+(\w+)\.\s+([A-Za-z]+(?: [A-Za-z]+)*)\s+moves\s+to\s+(\w+)";
             Match match = Regex.Match(_eventText, pattern);
             List<Outcome> eventOutcome = new List<Outcome>();
             if (match.Success) // swap
             {
-                string firstPerson = match.Groups[1].Value;
-                string firstDestination = match.Groups[2].Value;
-                string secondPerson = match.Groups[3].Value;
-                string secondDestination = match.Groups[4].Value;
+                string firstPerson = match.Groups[1].Value.Trim();
+                string firstDestination = match.Groups[2].Value.Trim();
+                string secondPerson = match.Groups[3].Value.Trim();
+                string secondDestination = match.Groups[4].Value.Trim();
+
                 if (Settings.DebugMode)
                 {
-                    LogMessage($"First Person: {firstPerson}", 5, Color.Blue);
-                    LogMessage($"First Destination: {firstDestination}", 5, Color.Blue);
-                    LogMessage($"Second Person: {secondDestination}", 5, Color.Blue);
-                    LogMessage($"Second Destination: {secondPerson}", 5, Color.Blue);
+                    LogMessage($"First Person: {firstPerson} -> {firstDestination}", 5, Color.Blue);
+                    LogMessage($"Second Person: {secondPerson} -> {secondDestination}", 5, Color.Blue);
                 }
-                List<string> _eventMasters = new List<string>();
-                _eventMasters.Add(firstPerson);
-                _eventMasters.Add(secondPerson);
 
-                //foreach (var _eventMaster in _eventMasters)
-                //{
-                //    LogMessage($"event masters: {_eventMaster}", 5, Color.Purple);
-                //}
+                var firstMaster = ListBetrayalMasters.FirstOrDefault(master => master.Name.Equals(firstPerson, StringComparison.OrdinalIgnoreCase));
+                var secondMaster = ListBetrayalMasters.FirstOrDefault(master => master.Name.Equals(secondPerson, StringComparison.OrdinalIgnoreCase));
 
-                var filteredMasters = ListBetrayalMasters.Where(master => _eventMasters.Contains(master.Name)).ToList();
+                int firstOldScore = firstMaster?.Score ?? 0;
+                int secondOldScore = secondMaster?.Score ?? 0;
 
-                //foreach(var filteredMaster in filteredMasters)
-                //{
-                //    LogMessage($"masters: {filteredMaster}", 5, Color.Blue);
-                //}
+                int firstNewScore = GetScore(firstPerson, firstDestination, firstMaster?.Rank ?? 1);
+                int secondNewScore = GetScore(secondPerson, secondDestination, secondMaster?.Rank ?? 1);
 
+                int netGain = (firstNewScore - firstOldScore) + (secondNewScore - secondOldScore);
 
-                List<BetrayalMaster> NewMasters = new List<BetrayalMaster>();
-                NewMasters.Add(
-                new BetrayalMaster(filteredMasters[0].Name, filteredMasters[1].Job, filteredMasters[0].Rank, filteredMasters[0].IsLeader, filteredMasters[0].Relationships, GetScore(filteredMasters[0].Name, filteredMasters[1].Job, filteredMasters[0].IsLeader ? filteredMasters[0].Rank + 1 : filteredMasters[0].Rank))
-                );
-                NewMasters.Add(
-                new BetrayalMaster(filteredMasters[1].Name, filteredMasters[0].Job, filteredMasters[1].Rank, filteredMasters[1].IsLeader, filteredMasters[1].Relationships, GetScore(filteredMasters[1].Name, filteredMasters[0].Job, filteredMasters[1].IsLeader ? filteredMasters[1].Rank + 1 : filteredMasters[1].Rank))
-                );
-
-
-
-
-
-
-
-
-                int oldScore = filteredMasters.Sum(master => master.Score);
-                int newScore = NewMasters.Sum(master => master.Score);
-                var _SpecialButton = syndicatePanel.BetrayalEventData.SpecialButton.GetClientRectCache;
-                var _ReleaseButton = syndicatePanel.BetrayalEventData.ReleaseButton.GetClientRectCache;
-  
-
-                    //Graphics.DrawFrame(_SpecialButton, Color.Green, 6);
-                    // good swap
-                    
-
-                    // the ones that leave
-                    foreach (var memberFiltered in filteredMasters)
-                    {
-                        if (Settings.DebugMode)
-                            LogMessage(memberFiltered.ToString(), 5, Color.Red);
-
-                        if(memberFiltered.Score >= 30)
-                        {
-                            eventOutcome.Add(new Outcome(OutcomeType.RemoveGoodMemberFromInterestingJob, ActionType.Special, -100, $"{memberFiltered.Name} who is interesting and on the correct job gets MOVED OUT "));
-                        }
-                        else  if (memberFiltered.Score >= 1)
-                        {
-                            eventOutcome.Add(new Outcome(OutcomeType.RemoveBadMemberFromBadJob, ActionType.Special, 0, $"{memberFiltered.Name} who is interesting and on the correct job gets MOVED OUT "));
-                        }
-                        else 
-                        {
-                            eventOutcome.Add(new Outcome(OutcomeType.RemoveBadMemberFromInterestingJob, ActionType.Special, 50, $"{memberFiltered.Name} who is interesting and on the correct job gets MOVED OUT "));
-                        }
-
-                    }
-                    // the ones that join
-                    foreach (var newMember in NewMasters)
-                    {
-                        if (Settings.DebugMode)
-                            LogMessage(newMember.ToString(), 5, Color.Green);
-
-                        if (newMember.Score >= 30)
-                        {
-                            eventOutcome.Add(new Outcome(OutcomeType.AddGoodMemberToInterestingJob, ActionType.Special, 100, $"{newMember.Name} who is interesting and on the correct job gets MOVED OUT "));
-                        }
-                        else if (newMember.Score >= 1)
-                        {
-                            eventOutcome.Add(new Outcome(OutcomeType.AddBadMemberToBadJob, ActionType.Special, 0, $"{newMember.Name} who is interesting and on the correct job gets MOVED OUT "));
-                        }
-                        else
-                        {
-                            eventOutcome.Add(new Outcome(OutcomeType.AddBadMemberToInterestingJob, ActionType.Special, -60, $"{newMember.Name} who is interesting and on the correct job gets MOVED OUT "));
-                        }
-                    }
-                
-               
-
-
-
-
-
+                if (netGain > 0)
+                {
+                    eventOutcome.Add(new Outcome(OutcomeType.AddGoodMemberToInterestingJob, ActionType.Special, 80 + netGain,
+                        $"Swap: {firstPerson} -> {firstDestination} ({firstNewScore:+#;-#;0}), {secondPerson} -> {secondDestination} ({secondNewScore:+#;-#;0}) (Net +{netGain})"));
+                }
+                else
+                {
+                    eventOutcome.Add(new Outcome(OutcomeType.AddBadMemberToInterestingJob, ActionType.Special, -80 + netGain,
+                        $"Swap: {firstPerson} -> {firstDestination}, {secondPerson} -> {secondDestination} worsens placement (Net {netGain})"));
+                }
             }
             return eventOutcome;
         }
@@ -2627,6 +3382,103 @@ namespace BetrayalHelper
             member.Relationships.Add(other.Name);
         }
 
+        private void UpdateMasterGoalStatus(BetrayalMaster master)
+        {
+            if (master == null) return;
+
+            string targetDiv = "";
+            if (Settings.DivisionMembers != null)
+            {
+                foreach (var kvp in Settings.DivisionMembers)
+                {
+                    if (kvp.Value != null && kvp.Value.Contains(master.Name))
+                    {
+                        targetDiv = kvp.Key;
+                        break;
+                    }
+                }
+            }
+            master.TargetDivision = targetDiv;
+
+            bool isTargetFarm = !string.IsNullOrEmpty(targetDiv)
+                && Settings.DivisionRoles.TryGetValue(targetDiv, out var tr) && tr == "Farm";
+
+            bool currentDivIsFarm = Settings.DivisionRoles.TryGetValue(master.Job, out var cr) && cr == "Farm";
+            bool currentDivIsFiller = Settings.DivisionRoles.TryGetValue(master.Job, out cr) && cr == "Filler";
+            bool isOutside = master.Job == "None" || string.IsNullOrEmpty(master.Job) || master.Job == "Outside";
+
+            if (Settings.FarmingMode == FarmingMode.CatarinaFocus)
+            {
+                bool isPreserved = Settings.CatarinaPreserveDivision.TryGetValue(master.Job, out var pres) && pres;
+                if (isPreserved && !string.IsNullOrEmpty(targetDiv) && master.Job.Equals(targetDiv, StringComparison.OrdinalIgnoreCase))
+                {
+                    master.IsWellPlaced = true;
+                    master.GoalStatus = master.Rank >= 3 ? "READY" : "NEEDS_RANK";
+                    master.GoalAction = master.Rank >= 3 ? "READY (Preserved - Run Safehouse)" : $"Rank Up (Preserved R{master.Rank}/3)";
+                }
+                else
+                {
+                    master.IsWellPlaced = !isOutside;
+                    master.GoalStatus = isOutside ? "OUTSIDE" : (master.Rank >= 3 ? "READY" : "NEEDS_RANK");
+                    master.GoalAction = isOutside ? "Recruit to any division" : $"Rank {master.Rank}/3 → Interrogate when high rank for Medallion/Intel";
+                }
+                return;
+            }
+
+            // SafehouseRewards (5-5-2-2) Mode:
+            if (isTargetFarm)
+            {
+                if (master.Job.Equals(targetDiv, StringComparison.OrdinalIgnoreCase))
+                {
+                    master.IsWellPlaced = true;
+                    if (master.Rank >= 3)
+                    {
+                        master.GoalStatus = "READY";
+                        master.GoalAction = master.IsLeader ? "READY! (Leader - Raid Safehouse)" : "READY! (Raid Safehouse)";
+                    }
+                    else
+                    {
+                        master.GoalStatus = "NEEDS_RANK";
+                        master.GoalAction = $"Rank Up (R{master.Rank}/3 - Execute)";
+                    }
+                }
+                else if (isOutside)
+                {
+                    master.IsWellPlaced = false;
+                    master.GoalStatus = "OUTSIDE";
+                    master.GoalAction = $"Recruit into {targetDiv} (Bargain/Execute when appears)";
+                }
+                else
+                {
+                    master.IsWellPlaced = false;
+                    master.GoalStatus = "MISPLACED";
+                    master.GoalAction = $"MISPLACED! Move to {targetDiv} (Interrogate out or Swap)";
+                }
+            }
+            else
+            {
+                // Not a target farm member
+                if (currentDivIsFarm)
+                {
+                    master.IsWellPlaced = false;
+                    master.GoalStatus = "MISPLACED";
+                    master.GoalAction = "INTRUDER! Kick out (INTERROGATE to Outside)";
+                }
+                else if (currentDivIsFiller)
+                {
+                    master.IsWellPlaced = true;
+                    master.GoalStatus = "FILLER";
+                    master.GoalAction = "Filler (Build Rivalries / Red Links)";
+                }
+                else
+                {
+                    master.IsWellPlaced = true;
+                    master.GoalStatus = "OUTSIDE";
+                    master.GoalAction = "Leave Outside (Reserve pool)";
+                }
+            }
+        }
+
         private void AddRelationshipOutcome(List<Outcome> outcomes, string relationshipType, BetrayalMaster first, BetrayalMaster second)
         {
             string firstJob = GetMemberEffectiveJob(first.Name, first.Job);
@@ -2689,8 +3541,7 @@ namespace BetrayalHelper
 
         private void AddInterrogationStrategyOutcome(List<Outcome> outcomes, BetrayalMaster member)
         {
-            int scarabCount = Math.Clamp(Settings.UnbreakingScarabs.Value, 0, 2);
-            double preserveRankChance = scarabCount * 0.5;
+            double preserveRankChance = KeepRankChance;
             bool shouldRun = ShouldRunDivision(member.Job);
 
             // Interrogation generates intelligence over three encounters but removes
@@ -2708,7 +3559,7 @@ namespace BetrayalHelper
                 shouldRun ? OutcomeType.GainInformationToInterestingJob : OutcomeType.GainInformationToBadJob,
                 ActionType.Interrogate,
                 total,
-                $"Interrogate strategy: intel {intelligenceValue:+#;-#;0}, rank-loss risk {expectedRankLossPenalty:+#;-#;0}, network absence {networkAbsencePenalty:+#;-#;0} (R{rivalLinks}/T{trustedLinks}), Unbreaking {scarabCount}/2"));
+                $"Interrogate strategy: intel {intelligenceValue:+#;-#;0}, rank-loss risk {expectedRankLossPenalty:+#;-#;0}, network absence {networkAbsencePenalty:+#;-#;0} (R{rivalLinks}/T{trustedLinks}), keep-rank {preserveRankChance:P0}"));
         }
 
         private IEnumerable<(string First, string Second, string Status)> GetUniqueRelationships()
@@ -2786,23 +3637,15 @@ namespace BetrayalHelper
 
         private int GetRankAfterExecute(int currentRank)
         {
-            int ranksGained = Settings.TestOfLoyalty ? 2 : 1;
-            return Math.Min(3, Math.Max(0, currentRank) + ranksGained);
+            // Execute = +1 rank, plus an expected extra rank from Enduring Legacy / small nodes.
+            double expected = Math.Max(0, currentRank) + 1 + ExtraRankChance;
+            return (int)Math.Min(3, Math.Round(expected, MidpointRounding.AwayFromZero));
         }
 
         private void AddExecuteIntelligenceOutcome(List<Outcome> outcomes, string division, int resultingRank)
         {
-            if (!Settings.LethalExtraction || string.IsNullOrEmpty(division) || division == "None")
-                return;
-
-            int intelligence = 2 * resultingRank;
-            bool shouldRun = ShouldRunDivision(division);
-            int score = shouldRun ? intelligence * 6 : -intelligence * 8;
-            outcomes.Add(new Outcome(
-                shouldRun ? OutcomeType.GainInformationToInterestingJob : OutcomeType.GainInformationToBadJob,
-                ActionType.Special,
-                score,
-                $"Lethal Extraction: +{intelligence} {division} Intelligence"));
+            // Lethal Extraction is removed in current PoE: no extra safehouse intelligence on Execute
+            return;
         }
 
         /// Returns 30 if this member is a Farm division member, 1 if Filler, 0 if unknown.
@@ -2875,17 +3718,41 @@ namespace BetrayalHelper
                 LogMessage(i + ": " + topGroup.Outcomes[i].ToString(), 5, Color.BlueViolet); // Ensure Outcome overrides ToString()
             }
 
+            RectangleF buttonToHighlight;
+            string recommendedText;
             if (topGroup.ActionType == ActionType.Special)
             {
-                Graphics.DrawFrame(_SpecialButton, Color.Green, 6);
+                buttonToHighlight = _SpecialButton;
+                recommendedText = $">> {_eventAction.ToUpper()} << ({topGroup.TotalScore} pts)";
             }
             else if (topGroup.ActionType == ActionType.Interrogate)
             {
-                Graphics.DrawFrame(_InterrogateButton, Color.Green, 6);
+                buttonToHighlight = _InterrogateButton;
+                recommendedText = $">> INTERROGATE << ({topGroup.TotalScore} pts)";
             }
             else
             {
-                Graphics.DrawFrame(_ReleaseButton, Color.Green, 6);
+                buttonToHighlight = _ReleaseButton;
+                recommendedText = $">> RELEASE << ({topGroup.TotalScore} pts)";
+            }
+
+            if (!buttonToHighlight.IsEmpty && buttonToHighlight.Width > 0)
+            {
+                Graphics.DrawFrame(buttonToHighlight, Color.Green, 6);
+                var fill = new Color(0, 255, 0, 45);
+                Graphics.DrawBox(buttonToHighlight, fill);
+
+                // The green frame already marks the recommended button; the raw label (action id + points) is debug-only.
+                if (!Settings.DebugMode.Value) return;
+                var labelPos = new Vector2N(buttonToHighlight.X, Math.Max(0, buttonToHighlight.Y - 26));
+                var overlayDrawList = ImGui.GetForegroundDrawList();
+                uint textColor = ImGui.ColorConvertFloat4ToU32(new System.Numerics.Vector4(0.2f, 1f, 0.2f, 1f));
+                uint shadowColor = ImGui.ColorConvertFloat4ToU32(new System.Numerics.Vector4(0f, 0f, 0f, 0.9f));
+                unsafe
+                {
+                    overlayDrawList.AddText(ImGui.GetFont(), 22f, new Vector2N(labelPos.X + 2, labelPos.Y + 2), shadowColor, recommendedText);
+                    overlayDrawList.AddText(ImGui.GetFont(), 22f, labelPos, textColor, recommendedText);
+                }
             }
         }
 
@@ -2902,26 +3769,46 @@ namespace BetrayalHelper
 
         private bool ReadInterrogationQueueFull(SyndicatePanel? syndicatePanel)
         {
-            if (syndicatePanel?.SyndicateStates == null)
+            if (syndicatePanel == null)
             {
-                _lastInterrogationCounterText = "Syndicate states unavailable";
+                _lastInterrogationCounterText = "Syndicate panel unavailable";
                 return false;
             }
 
             try
             {
-                // In the current Betrayal board layout, child 18 of a member's
-                // UI card is visible only while that member occupies one of the
-                // three interrogation cells at the bottom of the board.
                 var prisoners = new List<string>();
-                foreach (var state in syndicatePanel.SyndicateStates)
-                {
-                    if (state?.UIElement == null || state.UIElement.ChildCount <= 18)
-                        continue;
 
-                    var prisonerMarker = state.UIElement.GetChildAtIndex(18);
-                    if (prisonerMarker?.IsVisible == true)
-                        prisoners.Add(state.Target?.Name ?? "unknown");
+                var syndicateStates = syndicatePanel.SyndicateStates;
+                if (syndicateStates != null && syndicateStates.Count > 0)
+                {
+                    foreach (var state in syndicateStates)
+                    {
+                        if (state?.UIElement == null || state.UIElement.ChildCount <= 18)
+                            continue;
+
+                        var prisonerMarker = state.UIElement.GetChildAtIndex(18);
+                        if (prisonerMarker?.IsVisible == true)
+                            prisoners.Add(state.Target?.Name ?? "unknown");
+                    }
+                }
+                else
+                {
+                    var boardContainer = syndicatePanel.Children?.Count > 0 ? syndicatePanel.Children[0] : null;
+                    if (boardContainer != null && boardContainer.Children != null)
+                    {
+                        for (int c = 9; c < boardContainer.Children.Count && c <= 23; c++)
+                        {
+                            var card = boardContainer.Children[c];
+                            if (card != null && card.IsVisible && card.Position.Y > 1700)
+                            {
+                                string name = "";
+                                try { name = card.Children[3]?.Children[0]?.Text?.Trim() ?? ""; } catch { }
+                                if (!string.IsNullOrEmpty(name) && allMasters.Contains(name))
+                                    prisoners.Add(name);
+                            }
+                        }
+                    }
                 }
 
                 _lastInterrogationCounterText = $"{prisoners.Count}/3 occupied"

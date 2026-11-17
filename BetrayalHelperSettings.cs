@@ -37,29 +37,35 @@ namespace BetrayalHelper
     {
         public ToggleNode DebugMode { get; set; }
         public ToggleNode MegaDebugMode { get; set; }
+        public ToggleNode ShowBoardOverview { get; set; }
+        // Show #1/#2/#3 click-order labels above encounter members (frames always stay).
+        public ToggleNode ShowPriorityOrder { get; set; } = new ToggleNode(true);
         public ButtonNode ReloadRules { get; set; } = new ButtonNode();
         public ToggleNode Enable { get; set; } = new ToggleNode(false);
 
-        // Atlas passives used by the decision engine. These defaults match the
-        // tree supplied by the user; they can be disabled when another tree is used.
-        public ToggleNode TestOfLoyalty { get; set; } = new ToggleNode(true);
-        public ToggleNode LethalExtraction { get; set; } = new ToggleNode(true);
-
-        // Betrayal Scarab of Unbreaking: each scarab gives 50% chance that an
-        // interrogated member does not lose rank. The map-device limit is 2.
-        public RangeNode<int> UnbreakingScarabs { get; set; } = new RangeNode<int>(2, 0, 2);
+        // Current Atlas passive tree (poedb Atlas_passive_skill, Betrayal mastery).
+        // Only nodes that change Execute / Interrogate rank outcomes affect decisions.
+        // Enduring Legacy: Executed members have 50% chance to gain an additional Rank.
+        public ToggleNode EnduringLegacy { get; set; } = new ToggleNode(true);
+        // Unconditional Release: Interrogated targets have 30% chance to not lose Rank.
+        public ToggleNode UnconditionalRelease { get; set; } = new ToggleNode(true);
 
         // Persisted geometry of the single safehouse planner window. These are
         // plain values so they are saved with the rest of the plugin settings
         // without adding technical controls to the settings UI.
+        [IgnoreMenu]
         public int SafehouseWindowX { get; set; } = 800;
+        [IgnoreMenu]
         public int SafehouseWindowY { get; set; } = 500;
+        [IgnoreMenu]
         public int SafehouseWindowWidth { get; set; } = 720;
+        [IgnoreMenu]
         public int SafehouseWindowHeight { get; set; } = 360;
 
         /// <summary>
         /// Overall farming strategy. Affects which safehouses to run and scoring logic.
         /// </summary>
+        [IgnoreMenu]
         public FarmingMode FarmingMode { get; set; } = FarmingMode.SafehouseRewards;
 
         /// <summary>
@@ -68,6 +74,7 @@ namespace BetrayalHelper
         /// In SafehouseRewards mode: Farm=Run, Filler=Skip.
         /// User can override manually.
         /// </summary>
+        [IgnoreMenu]
         public Dictionary<string, bool> DivisionShouldRun { get; set; } = new Dictionary<string, bool>
         {
             { "Transportation", true },
@@ -80,6 +87,7 @@ namespace BetrayalHelper
         /// Catarina Focus only: keep configured members in selected divisions.
         /// Member placement in unselected divisions is ignored.
         /// </summary>
+        [IgnoreMenu]
         public Dictionary<string, bool> CatarinaPreserveDivision { get; set; } = new Dictionary<string, bool>
         {
             { "Transportation", false },
@@ -90,6 +98,7 @@ namespace BetrayalHelper
 
         // "Farm" or "Filler" per division
         // Farm = divisions you run safehouses for; Filler = board blockers
+        [IgnoreMenu]
         public Dictionary<string, string> DivisionRoles { get; set; } = new Dictionary<string, string>
         {
             { "Transportation", "Farm" },
@@ -99,6 +108,7 @@ namespace BetrayalHelper
         };
 
         // Desired members per division. Ordering has no strategic meaning.
+        [IgnoreMenu]
         public Dictionary<string, List<string>> DivisionMembers { get; set; } = new Dictionary<string, List<string>>
         {
             { "Transportation", new List<string> { "Gravicius", "It That Fled" } },
@@ -111,6 +121,7 @@ namespace BetrayalHelper
         {
             DebugMode = new ToggleNode(false);
             MegaDebugMode = new ToggleNode(false);
+            ShowBoardOverview = new ToggleNode(true);
         }
     }
 }

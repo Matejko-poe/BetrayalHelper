@@ -8,6 +8,18 @@
     public Dictionary<string, string> RelationshipStatuses { get; set; }
     public int Score { get; set; }
 
+    // Board detection & visual tracking
+    public int SlotIndex { get; set; } = -1;
+    public float ScreenX { get; set; } = 0;
+    public float ScreenY { get; set; } = 0;
+    public float Width { get; set; } = 0;
+
+    // Strategic goal analysis
+    public string TargetDivision { get; set; } = "";
+    public bool IsWellPlaced { get; set; } = false;
+    public string GoalStatus { get; set; } = "";
+    public string GoalAction { get; set; } = "";
+
     // Constructor
     public BetrayalMaster()
     {

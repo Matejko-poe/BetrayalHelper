@@ -15,10 +15,10 @@ The plugin is designed primarily for a classic **5-5-2-2 board**: two compact re
 - Highlights the recommended `Special`, `Interrogate`, or `Release` button.
 - Configurable Farm/Filler role for every division.
 - Configurable Run/Skip policy independent of member placement.
-- Desired member sets without a preferred-leader requirement.
+- Board Overview: per-division members, ranks, highlighted leader, goal marker, live safehouse intel bars, and a list of members missing from the board.
+- Safehouse alert when a Run division reaches 100 intelligence (read from memory).
 - Rank-aware Execute scoring.
-- Optional Atlas-passive modelling for Test of Loyalty and Lethal Extraction.
-- Betrayal Scarab of Unbreaking support from 0 to 2 scarabs.
+- Atlas modelling for the current tree: Enduring Legacy and Unconditional Release.
 - Relationship scoring optimized for a bipartite 5-5-2-2 network.
 - Debug and verbose-debug output for unsupported or changed encounter text.
 
@@ -68,9 +68,9 @@ ExileCore compiles source plugins when it starts. Build output belongs in `bin/`
 2. Mark the two reward divisions as `Farm` and the two storage divisions as `Filler`.
 3. Put two desired members in each Farm division.
 4. Put five remaining members in each Filler division.
-5. Set Run/Skip separately for every safehouse.
-6. Enable Test of Loyalty or Lethal Extraction only if allocated on your Atlas tree.
-7. Set Unbreaking Scarabs to the number inserted into the current map.
+5. Order each list so the preferred leader is first.
+6. Set Run/Skip separately for every safehouse.
+7. Enable Enduring Legacy and Unconditional Release only if allocated on your Atlas tree.
 
 The defaults are examples, not universal economic recommendations. Safehouse rewards change between leagues; configure members for your own goals.
 
@@ -114,20 +114,21 @@ Run/Skip answers a different question from Farm/Filler: should intelligence for 
 
 ### Atlas passives
 
-- `TestOfLoyalty`: Execute is modelled as +2 ranks, capped at rank 3.
-- `LethalExtraction`: Execute adds `2 × resulting rank` intelligence to the member's current division.
+Source: poedb Atlas passive tree, Betrayal mastery. Test of Loyalty and Lethal Extraction no longer exist.
 
-Only passives that change encounter decisions are exposed. Drop-only passives are intentionally absent.
+- `EnduringLegacy`: Executed members have 50% chance to gain an additional rank. Modelled as expected rank (rounded) after Execute.
+- `UnconditionalRelease`: Interrogated targets have 30% chance to not lose rank. Scales the rank-loss penalty of Interrogate.
 
-### Unbreaking Scarabs
+Other Betrayal nodes (Head of the Snake, Hidden Flank, Hard Bargain, Coercive Interrogation, drop and rarity nodes, small rank nodes) do not change the Special/Interrogate/Release choice and are not modelled. Enable only the nodes you actually allocated.
 
-`UnbreakingScarabs` accepts 0, 1, or 2:
+### Display
 
-- 0: normal rank-loss risk after interrogation.
-- 1: 50% expected rank preservation.
-- 2: 100% expected rank preservation.
+- `ShowBoardOverview`: Board Overview window.
+- `ShowPriorityOrder`: #1/#2/#3 labels above encounter members (order: members with relationships first, more Rivals, higher score). Frames always show. The raw action label above the recommended button appears only in `DebugMode`.
 
-Even at two scarabs, interrogation temporarily removes the member from encounters and reinforcement selection. Highly connected members retain an absence penalty.
+### Safehouse intelligence
+
+Intel (0-100) is read per division leader from the board state vector at `state + 0x84` (first four entries of the vector at `SyndicatePanel + 0x3F8`). Verified live: +6 intel changed 72 to 78. A Run division at 100 shows a banner and opens the safehouse window.
 
 ## How scoring works
 
@@ -142,7 +143,7 @@ Major components include:
 - immediate and future intelligence,
 - relationship topology,
 - temporary interrogation absence,
-- expected rank preservation from Unbreaking scarabs,
+- expected rank preservation from Unconditional Release,
 - destructive Betray side effects,
 - board capacity and missing desired members.
 
@@ -206,8 +207,8 @@ dotnet build .\BetrayalHelper.csproj --no-restore
 - SafehouseRewards is better tested than CatarinaFocus.
 - Some UI fields are accessed through child indices and string representations supplied by ExileAPI.
 - Relationship types are read directly from `ServerData.BetrayalMemberRelationships`; no screen-colour detection is required.
-- Lethal Extraction is currently assumed to use the resulting post-Execute rank.
-- Scarab count is configured manually per mapping setup.
+- Atlas nodes are toggled manually; the plugin does not read the Atlas tree.
+- Member names: the engine uses `ItThatFled`; the plugin normalizes it to `It That Fled`.
 - Intelligence value is not yet capped precisely by the remaining amount to 100 in every outcome parser.
 - No automated test suite currently simulates every localized encounter string.
 

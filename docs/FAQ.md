@@ -6,7 +6,7 @@
 - [Board layout](#board-layout)
 - [Relationships](#relationships)
 - [Decisions and scoring](#decisions-and-scoring)
-- [Atlas passives and scarabs](#atlas-passives-and-scarabs)
+- [Atlas passives](#atlas-passives)
 - [Installation and compatibility](#installation-and-compatibility)
 - [Troubleshooting](#troubleshooting)
 - [Privacy and automation](#privacy-and-automation)
@@ -55,9 +55,9 @@ They store the remaining board members, reduce unwanted placement options, and p
 
 Farm/Filler controls desired member placement. Run/Skip controls whether intelligence and completion of that safehouse are desirable. They are intentionally independent.
 
-### Does the first member or preferred leader have special value?
+### Why is the first member in a division special?
 
-No. Configured members form an unordered set. BetrayalHelper does not prefer a particular member as leader and does not penalize a leadership change by identity. It still displays the current leader because leader rank and availability matter when running a safehouse.
+The ordered list treats index zero as the preferred leader. Moving a different member to leadership may therefore receive a lower score.
 
 ### Does the plugin enforce the layout?
 
@@ -67,7 +67,7 @@ No. It recommends choices that move the observed board toward the configured lay
 
 ### How does the plugin know whether a line is Rival or Trusted?
 
-It reads `ServerData.BetrayalMemberRelationships` directly from ExileCore. While a decision is displayed, that map can already contain the previewed result, so the plugin reconstructs only the affected pair from the option text instead of caching relationships between conversations. `become Rivals` is conservatively evaluated as Trusted to Rival, `become Trusted` as no link to Trusted, and `become Neutral` as Rival to no link. Line colours are not inferred from pixels.
+It reads `ServerData.BetrayalMemberRelationships` directly from ExileCore. The plugin snapshots the committed topology before a decision card opens because the live data can already contain the previewed result while an option is displayed. Line colours are not inferred from pixels.
 
 ### Why are members without relationships left until last?
 
@@ -103,7 +103,7 @@ It destroys accumulated board structure and usually requires many encounters to 
 
 ### Do relationships guarantee reinforcements?
 
-No. They influence eligibility and likelihood; encounter type, ranks, leaders, board state, Atlas modifiers, scarabs, and random selection still matter.
+No. They influence eligibility and likelihood; encounter type, ranks, leaders, board state, Atlas modifiers, and random selection still matter.
 
 ### Why did a linked member not appear?
 
@@ -129,17 +129,17 @@ A correctly placed Farm member receives `30 + 10 × rank` before event-specific 
 
 ### Why might Execute in a Skip division be bad?
 
-With Lethal Extraction it can grant unwanted safehouse intelligence. It can also strengthen an incorrectly placed member.
+It can grant unwanted safehouse intelligence and can also strengthen an incorrectly placed member.
 
 ### Why might Execute a rank-1 Farm member be excellent?
 
-With Test of Loyalty, the plugin models it as reaching rank 3 immediately, greatly increasing the member's safehouse value.
+With Enduring Legacy (50% extra rank), the plugin models the expected rank, which can count as reaching rank 3 sooner.
 
 ### Why is Execute at rank 3 sometimes neutral?
 
-If the UI reports no rank effect, the promotion component is zero. Other effects such as Lethal Extraction or relationship consequences can still matter.
+If the UI reports no rank effect, the promotion component is zero. Other effects such as relationship consequences can still matter.
 
-### Why is Interrogate not automatically good with two Unbreaking scarabs?
+### Why is Interrogate not automatically good with Unconditional Release?
 
 The member is still absent for three encounters and cannot reinforce. Interrogation can also generate intelligence for a division marked Skip or immediately remove a leader from leadership.
 
