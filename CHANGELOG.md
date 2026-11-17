@@ -16,6 +16,10 @@ All notable changes to BetrayalHelper are documented here. The format follows Ke
 - Execute promote score uses expected rank gain (1 + extra-rank chance, capped at R3) instead of a rounded rank jump.
 - Interrogate payoff for kicking an intruder out is scaled by (1 - keep-rank chance).
 
+### Removed
+- All UI-tree / screen-position fallbacks (card coordinates, `Position.Y > 1700` prisoner check, `SyndicateStates` wrapper, safehouse UI-element signal). Game memory is the only data source; if the board memory cannot be read, a red "MEMORY READ FAILED" window appears and recommendations are blocked.
+- Prisoner count (3/3 queue) is currently not read (no verified offset); Interrogate stays selectable until the offset is mapped.
+
 ### Fixed
 - Farm division capacity in Execute/swap "no space" checks follows the configured member count instead of a hardcoded 2; null-guard for missing label list; debug header shows real roster size.
 - `ShouldRunDivision` ignored the per-division Run/Skip setting and returned the Farm role; Run is authoritative again (this is what made Release win over +4 Research Intelligence).

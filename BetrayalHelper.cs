@@ -25,6 +25,7 @@ namespace BetrayalHelper
         private Action ShowSyndicateBoard;
         List<BetrayalMaster> ListBetrayalMasters = new List<BetrayalMaster>();
         bool badJobsAreFull = false;
+        bool _memoryReadOk = true;
         bool hasClosedWindow = false;
         bool _closedOverviewForCurrentPanel = false;
         private readonly HashSet<string> _readySafehouses = new(StringComparer.OrdinalIgnoreCase);
@@ -716,84 +717,12 @@ namespace BetrayalHelper
             return Settings.DivisionRoles.TryGetValue(division, out var role) && role == "Farm";
         }
 
-        private void UpdateReadySafehouses(Element boardContainer)
+        private void UpdateReadySafehouses()
         {
             _readySafehouses.Clear();
-
-            var divisionsToCheck = new[] { "Transportation", "Fortification", "Research", "Intervention" };
-            var shIndexMap = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["Intervention"] = 0,
-                ["Transportation"] = 1,
-                ["Research"] = 2,
-                ["Fortification"] = 3
-            };
-
             foreach (var kv in ReadDivisionIntel())
                 if (kv.Value >= 100 && ShouldRunDivision(kv.Key))
                     _readySafehouses.Add(kv.Key);
-
-            foreach (var div in divisionsToCheck.Where(_ => false)) // legacy UI/rank signals disabled: real intel is read above
-            {
-                if (!ShouldRunDivision(div) || _readySafehouses.Contains(div))
-                    continue;
-
-                bool isReady = false;
-
-                // Signal 2: In-game board safehouse UI element indicator
-                try
-                {
-                    if (boardContainer != null && shIndexMap.TryGetValue(div, out int shIdx) && boardContainer.Children.Count > shIdx)
-                    {
-                        var shElem = boardContainer.Children[shIdx];
-                        if (shElem != null && shElem.Children.Count > 0)
-                        {
-                            foreach (var ch in shElem.Children)
-                            {
-                                if (ch.IsVisible || ch.IsVisibleLocal)
-                                {
-                                    isReady = true;
-                                    break;
-                                }
-                                string t = ch.Text ?? "";
-                                if (t.IndexOf("100", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                                    t.IndexOf("Raid", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                                    t.IndexOf("Safehouse", StringComparison.OrdinalIgnoreCase) >= 0)
-                                {
-                                    isReady = true;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                }
-                catch { }
-
-                // Signal 3: Strategy readiness (All configured targets in this Farm division are present with Rank 3)
-                try
-                {
-                    if (!isReady && Settings.DivisionMembers.TryGetValue(div, out var targets) && targets != null && targets.Count > 0)
-                    {
-                        var currentDivMembers = ListBetrayalMasters.Where(m => m.Job.Equals(div, StringComparison.OrdinalIgnoreCase)).ToList();
-                        bool allTargetsPresentAndRank3 = targets.All(targetName =>
-                        {
-                            var m = currentDivMembers.FirstOrDefault(x => x.Name.Equals(targetName, StringComparison.OrdinalIgnoreCase));
-                            return m != null && m.Rank >= 3;
-                        });
-
-                        if (allTargetsPresentAndRank3)
-                        {
-                            isReady = true;
-                        }
-                    }
-                }
-                catch { }
-
-                if (isReady)
-                {
-                    _readySafehouses.Add(div);
-                }
-            }
         }
 
         private bool ShouldPreserveMemberPlacement(string division)
@@ -860,30 +789,10 @@ namespace BetrayalHelper
 
                 // Read current ranks of farm members from syndicate board
                 var farmMemberInfo = new Dictionary<string, (string job, int rank)>();
-                var syndicateStates = syndicatePanel.SyndicateStates;
-                if (syndicateStates != null && syndicateStates.Count > 0)
+                foreach (var m in ListBetrayalMasters)
                 {
-                    for (int i = 0; i < syndicateStates.Count; i++)
-                    {
-                        var state = syndicateStates[i];
-                        string[] parts = state.ToString().Split(',');
-                        if (parts.Length < 3) continue;
-                        var stateName = parts[0].Trim();
-                        var stateJob = parts[2].Trim();
-                        var stateRank = state.Rank.RankInt;
-                        bool stateIsLeader = i < 4;
-                        var effectiveRank = stateRank;
-                        if (farmJobs.Values.Any(members => members.Contains(stateName)))
-                            farmMemberInfo[stateName] = (stateJob, effectiveRank);
-                    }
-                }
-                else
-                {
-                    foreach (var m in ListBetrayalMasters)
-                    {
-                        if (farmJobs.Values.Any(members => members.Contains(m.Name)))
-                            farmMemberInfo[m.Name] = (m.Job, m.Rank);
-                    }
+                    if (farmJobs.Values.Any(members => members.Contains(m.Name)))
+                        farmMemberInfo[m.Name] = (m.Job, m.Rank);
                 }
 
                 // Build safehouse advice per division
@@ -1222,8 +1131,7 @@ namespace BetrayalHelper
             ImGui.Separator();
 
             // ── SAFEHOUSE READY ALERT BANNER ──────────────────────────────────────────
-            var boardContainer = syndicatePanel?.Children?.Count > 0 ? syndicatePanel.Children[0] : null;
-            UpdateReadySafehouses(boardContainer);
+            UpdateReadySafehouses();
 
             if (_readySafehouses.Count > 0)
             {
@@ -1645,277 +1553,13 @@ namespace BetrayalHelper
                     LogMessage($"Memory syndicate parse error: {ex.Message}", 5, Color.Red);
             }
 
-            ExileCore.PoEMemory.Element boardContainer = null;
-
-            // Fallback UI-tree parser ONLY if direct memory reading completely failed (0 masters)
-            if (newMasters.Count == 0)
+            // Memory is the only data source. No screen-position / UI-tree fallbacks.
+            _memoryReadOk = newMasters.Count > 0;
+            if (!_memoryReadOk)
             {
-                newMasters.Clear();
-                try
-                {
-                    if (ingameState?.IngameUi?.Children != null)
-                    {
-                        long panelAddr = syndicatePanel.Address;
-                        foreach (var uiChild in ingameState.IngameUi.Children)
-                        {
-                            if (uiChild != null && uiChild.Address == panelAddr && uiChild.Children?.Count > 0)
-                            {
-                                boardContainer = uiChild.Children[0];
-                                break;
-                            }
-                        }
-                    }
-                    boardContainer ??= syndicatePanel.Children?.Count > 0 ? syndicatePanel.Children[0] : null;
-
-                    if (boardContainer != null && boardContainer.Children?.Count > 0)
-                    {
-                        var rawCards = new List<(string Name, float X, float Y, float Width, int Rank, bool InDivision, bool HasLeaderFrame, int SlotIndex)>();
-                        var boardRect = boardContainer.GetClientRectCache;
-                        float boardLeft = boardRect.X;
-                        float boardTop = boardRect.Y;
-                        float boardWidth = boardRect.Width;
-                        float boardHeight = boardRect.Height;
-
-                        for (int c = 0; c < boardContainer.Children.Count; c++)
-                        {
-                            var card = boardContainer.Children[c];
-                            if (card == null || !card.IsValid) continue;
-
-                            string name = "";
-                            try
-                            {
-                                if (card.Children.Count > 3 && card.Children[3].Children.Count > 0)
-                                    name = card.Children[3].Children[0].Text?.Trim() ?? "";
-                                if (string.IsNullOrEmpty(name) && card.Children.Count > 3)
-                                    name = card.Children[3].Text?.Trim() ?? "";
-                            }
-                            catch { }
-
-                            // Robust fallback search through children if name wasn't at [3][0]
-                            if (string.IsNullOrEmpty(name) || !allMasters.Contains(name))
-                            {
-                                foreach (var sub in card.Children)
-                                {
-                                    var t = sub?.Text?.Trim();
-                                    if (!string.IsNullOrEmpty(t) && allMasters.Contains(t)) { name = t; break; }
-                                    if (sub?.Children != null)
-                                    {
-                                        foreach (var sub2 in sub.Children)
-                                        {
-                                            var t2 = sub2?.Text?.Trim();
-                                            if (!string.IsNullOrEmpty(t2) && allMasters.Contains(t2)) { name = t2; break; }
-                                        }
-                                        if (!string.IsNullOrEmpty(name)) break;
-                                    }
-                                }
-                            }
-
-                            if (string.IsNullOrEmpty(name) || name.Equals("Catarina", StringComparison.OrdinalIgnoreCase) || !allMasters.Contains(name))
-                                continue;
-
-                            // Local position inside board container
-                            float posX = 0, posY = 0, width = 0;
-                            try
-                            {
-                                var pos = card.Position;
-                                posX = pos.X;
-                                posY = pos.Y;
-                                width = card.Width;
-                            }
-                            catch { }
-
-                            // Screen center position for percentage calculations
-                            float screenX = posX, screenY = posY;
-                            try
-                            {
-                                var rect = card.GetClientRectCache;
-                                if (rect.Width > 0)
-                                {
-                                    screenX = rect.Center.X;
-                                    screenY = rect.Center.Y;
-                                    if (width <= 0) width = rect.Width;
-                                }
-                            }
-                            catch { }
-
-                            // Leaders have a larger frame (width ~324px vs ~283.5px for members) or Child[2] frame
-                            bool hasLeaderFrame = (width > 300 && width < 345);
-                            try
-                            {
-                                if (card.Children.Count > 2 && (card.Children[2].IsVisible || card.Children[2].IsVisibleLocal))
-                                    hasLeaderFrame = true;
-                            }
-                            catch { }
-
-                            // Detect rank directly from Child[6..18] stars
-                            int rank = 0;
-                            try
-                            {
-                                int maxStarIdx = -1;
-                                for (int s = 6; s <= 18 && s < card.Children.Count; s++)
-                                {
-                                    if (card.Children[s].IsVisible || card.Children[s].IsVisibleLocal)
-                                        maxStarIdx = s;
-                                }
-                                if (maxStarIdx >= 16) rank = 3;
-                                else if (maxStarIdx >= 12) rank = 2;
-                                else if (maxStarIdx >= 6) rank = 1;
-                                else if (card.Children.Count > 5 && card.Children[5].Children.Count > 0)
-                                    rank = Math.Clamp(card.Children[5].Children.Count, 1, 3);
-                            }
-                            catch { }
-
-                            // Division detection: board members have posY < 1750 or screen relative Y < 0.75
-                            bool inDivision = false;
-                            if (posY > 0 && posY < 1750) inDivision = true;
-                            else if (boardHeight > 0 && screenY > boardTop && (screenY - boardTop) / boardHeight < 0.75f) inDivision = true;
-
-                            try
-                            {
-                                if (card.Children.Count > 4 && (card.Children[4].IsVisible || card.Children[4].IsVisibleLocal)) inDivision = true;
-                                if (card.Children.Count > 19 && (card.Children[19].IsVisible || card.Children[19].IsVisibleLocal)) inDivision = true;
-                            }
-                            catch { }
-
-                            if (rank > 0) inDivision = true;
-                            if (posY >= 1750 && rank == 0) inDivision = false;
-                            if (inDivision && rank == 0) rank = 1;
-
-                            rawCards.Add((name, posX, posY, width, rank, inDivision, hasLeaderFrame, c));
-                        }
-
-                        // Check active encounter event for live precision (NPC name, job, rank)
-                        var eventElement = syndicatePanel.EventElement ?? syndicatePanel.BetrayalEventData;
-                        string eventNpcName = "";
-                        string eventNpcJob = "";
-                        int eventNpcRank = -1;
-                        if (eventElement != null && (eventElement.IsVisible || eventElement.IsVisibleLocal))
-                        {
-                            try { eventNpcName = eventElement.Target2?.Name ?? ""; } catch { }
-                            try
-                            {
-                                if (eventElement.Children.Count > 4 && eventElement.Children[4].Children.Count > 6)
-                                {
-                                    var cardElem = eventElement.Children[4];
-                                    if (string.IsNullOrEmpty(eventNpcName))
-                                        eventNpcName = cardElem.Children[4]?.Text?.Trim() ?? "";
-
-                                    var textElem = cardElem.Children[6].Children.Count > 0 ? cardElem.Children[6].Children[0] : cardElem.Children[6];
-                                    var lines = (textElem?.Text ?? "").Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
-                                    foreach (var line in lines)
-                                    {
-                                        var l = line.Trim();
-                                        if (l.Equals("Transportation", StringComparison.OrdinalIgnoreCase) ||
-                                            l.Equals("Fortification", StringComparison.OrdinalIgnoreCase) ||
-                                            l.Equals("Research", StringComparison.OrdinalIgnoreCase) ||
-                                            l.Equals("Intervention", StringComparison.OrdinalIgnoreCase))
-                                        {
-                                            eventNpcJob = l;
-                                        }
-                                        else if (l.IndexOf("Sergeant", StringComparison.OrdinalIgnoreCase) >= 0) eventNpcRank = 1;
-                                        else if (l.IndexOf("Lieutenant", StringComparison.OrdinalIgnoreCase) >= 0) eventNpcRank = 2;
-                                        else if (l.IndexOf("Captain", StringComparison.OrdinalIgnoreCase) >= 0) eventNpcRank = 3;
-                                    }
-                                }
-                            }
-                            catch { }
-                        }
-
-                        var divisionMembers = new Dictionary<string, List<(string Name, float X, float Y, float Width, int Rank, bool InDivision, bool HasLeaderFrame, int SlotIndex)>>(StringComparer.OrdinalIgnoreCase)
-                        {
-                            ["Transportation"] = new(),
-                            ["Fortification"] = new(),
-                            ["Research"] = new(),
-                            ["Intervention"] = new(),
-                            ["None"] = new()
-                        };
-
-                        foreach (var card in rawCards)
-                        {
-                            string div = "None";
-                            if (card.InDivision && card.Y < 1750)
-                            {
-                                // 2x2 Quadrant layout on the Syndicate board:
-                                // Left side (X < 2100):
-                                //   Top:    Fortification (Y < 1200)
-                                //   Bottom: Transportation (Y >= 1200)
-                                // Right side (X >= 2100):
-                                //   Top-inner: Research (Y < 1150 && X < 3300)
-                                //   Outer/bot: Intervention
-                                if (card.X < 2100)
-                                {
-                                    div = card.Y < 1200 ? "Fortification" : "Transportation";
-                                }
-                                else
-                                {
-                                    div = (card.Y < 1150 && card.X < 3300) ? "Research" : "Intervention";
-                                }
-                            }
-
-                            if (!string.IsNullOrEmpty(eventNpcName) && card.Name.Equals(eventNpcName, StringComparison.OrdinalIgnoreCase) && !string.IsNullOrEmpty(eventNpcJob))
-                            {
-                                div = eventNpcJob;
-                            }
-
-                            divisionMembers[div].Add(card);
-                        }
-
-                        foreach (var kvp in divisionMembers)
-                        {
-                            string divName = kvp.Key;
-                            var membersInDiv = kvp.Value;
-                            if (membersInDiv.Count == 0) continue;
-
-                            var sorted = membersInDiv.OrderBy(m => m.Y).ToList();
-                            string leaderName = "";
-                            if (divName != "None")
-                            {
-                                var leaderCandidate = sorted.FirstOrDefault(m => m.HasLeaderFrame);
-                                leaderName = !string.IsNullOrEmpty(leaderCandidate.Name) ? leaderCandidate.Name : sorted[0].Name;
-                            }
-
-                            foreach (var m in sorted)
-                            {
-                                int rank = m.Rank;
-                                if (!string.IsNullOrEmpty(eventNpcName) && m.Name.Equals(eventNpcName, StringComparison.OrdinalIgnoreCase) && eventNpcRank >= 0)
-                                {
-                                    rank = eventNpcRank;
-                                }
-
-                                bool isLeader = divName != "None" && m.Name.Equals(leaderName, StringComparison.OrdinalIgnoreCase);
-
-                                var typedRelationships = liveRelationships.TryGetValue(m.Name, out var savedRelationships)
-                                    ? new Dictionary<string, string>(savedRelationships, StringComparer.OrdinalIgnoreCase)
-                                    : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-
-                                List<string> stateNames = typedRelationships.Keys.ToList();
-                                int score = GetScore(m.Name, divName, rank);
-                                var betrayalMaster = new BetrayalMaster(m.Name, divName, rank, isLeader, stateNames, score)
-                                {
-                                    SlotIndex = m.SlotIndex,
-                                    ScreenX = m.X,
-                                    ScreenY = m.Y,
-                                    Width = m.Width
-                                };
-                                betrayalMaster.RelationshipStatuses = typedRelationships;
-                                UpdateMasterGoalStatus(betrayalMaster);
-
-                                if (Settings.MegaDebugMode)
-                                    LogMessage(betrayalMaster.ToString(), 5, Color.Red);
-
-                                newMasters.Add(betrayalMaster);
-                            }
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    if (Settings.DebugMode)
-                        LogMessage($"UI syndicate parse error: {ex.Message}", 5, Color.Red);
-                }
+                _readySafehouses.Clear(); // keep the last memory-derived list; recommendations are blocked while the read fails
             }
-
-            if (newMasters.Count > 0)
+            else
             {
                 ListBetrayalMasters = newMasters;
 
@@ -1929,13 +1573,24 @@ namespace BetrayalHelper
                     .Distinct()
                     .ToList();
 
-                UpdateReadySafehouses(boardContainer);
+                UpdateReadySafehouses();
             }
         }
 
         private void DrawSyndicateBoard(SyndicatePanel syndicatePanel)
         {
             updateSyndicateInfo();
+            if (!_memoryReadOk)
+            {
+                ImGui.SetNextWindowSize(new Vector2N(520, 110), ImGuiCond.FirstUseEver);
+                if (ImGui.Begin("BetrayalHelper - MEMORY READ FAILED###BetrayalMemoryFail"))
+                {
+                    ImGui.TextColored(new System.Numerics.Vector4(1f, 0.3f, 0.3f, 1f), "Syndicate board memory could not be read.");
+                    ImGui.TextWrapped("BetrayalHelper only works from game memory (SyndicatePanel + 0x3F8 state vector). A game patch probably moved the offset. Recommendations are disabled.");
+                }
+                ImGui.End();
+                return;
+            }
             DrawBottomBoardGui();
 
             BetrayalEventData? eventData = null;
@@ -3787,61 +3442,11 @@ namespace BetrayalHelper
 
         private bool ReadInterrogationQueueFull(SyndicatePanel? syndicatePanel)
         {
-            if (syndicatePanel == null)
-            {
-                _lastInterrogationCounterText = "Syndicate panel unavailable";
-                return false;
-            }
-
-            try
-            {
-                var prisoners = new List<string>();
-
-                var syndicateStates = syndicatePanel.SyndicateStates;
-                if (syndicateStates != null && syndicateStates.Count > 0)
-                {
-                    foreach (var state in syndicateStates)
-                    {
-                        if (state?.UIElement == null || state.UIElement.ChildCount <= 18)
-                            continue;
-
-                        var prisonerMarker = state.UIElement.GetChildAtIndex(18);
-                        if (prisonerMarker?.IsVisible == true)
-                            prisoners.Add(state.Target?.Name ?? "unknown");
-                    }
-                }
-                else
-                {
-                    var boardContainer = syndicatePanel.Children?.Count > 0 ? syndicatePanel.Children[0] : null;
-                    if (boardContainer != null && boardContainer.Children != null)
-                    {
-                        for (int c = 9; c < boardContainer.Children.Count && c <= 23; c++)
-                        {
-                            var card = boardContainer.Children[c];
-                            if (card != null && card.IsVisible && card.Position.Y > 1700)
-                            {
-                                string name = "";
-                                try { name = card.Children[3]?.Children[0]?.Text?.Trim() ?? ""; } catch { }
-                                if (!string.IsNullOrEmpty(name) && allMasters.Contains(name))
-                                    prisoners.Add(name);
-                            }
-                        }
-                    }
-                }
-
-                _lastInterrogationCounterText = $"{prisoners.Count}/3 occupied"
-                    + (prisoners.Count > 0 ? $" ({string.Join(", ", prisoners)})" : "");
-                return prisoners.Count >= 3;
-            }
-            catch
-            {
-                _lastInterrogationCounterText = "prisoner state read failed";
-                return false;
-            }
+            // The prisoner flag has no verified memory offset yet. No UI/position heuristics are
+            // allowed, so the queue is treated as "not full" (Interrogate stays selectable) until
+            // the offset is found with a before/after memory snapshot (tools/intel_snap.py).
+            _lastInterrogationCounterText = "prisoner count: memory offset not mapped yet";
+            return false;
         }
-
-
-
-
     }
 }
