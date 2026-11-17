@@ -9,6 +9,8 @@ The plugin is designed primarily for a classic **5-5-2-2 board**: two compact re
 > [!IMPORTANT]
 > BetrayalHelper is a decision-support overlay. It does not click buttons, automate encounters, or modify game memory.
 
+Offsets and how they were found: [docs/MEMORY_OFFSETS.md](docs/MEMORY_OFFSETS.md).
+
 ## Design rule
 
 Memory only. The plugin reads the Syndicate board from game memory (state vector at `SyndicatePanel + 0x3F8`, stride 160). It never infers data from card positions or UI layout. If the read fails it says so and stops recommending.

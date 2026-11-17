@@ -5,6 +5,7 @@ All notable changes to BetrayalHelper are documented here. The format follows Ke
 ## [Unreleased]
 
 ### Added
+- `docs/MEMORY_OFFSETS.md`: every memory offset the plugin uses, with status and the before/after method for finding new ones.
 - Real safehouse intelligence: leader state `+0x84` (verified 72 -> 78 after +6 event). Per-division Intel bars in Board Overview; banner and safehouse window trigger at 100 for Run divisions.
 - `ShowPriorityOrder` setting; orange frame for Farm targets still outside the board.
 - `tools/intel_snap.py` (in BetrayalHelperv2/tools) to snapshot/diff board memory.

@@ -172,7 +172,7 @@ namespace BetrayalHelper
 
         private record SystemCheck(string Name, string Status, string Detail);
 
-        private string ReadStateString(IMemory mem, long ptr)
+        private string ReadStateString(ExileCore.Shared.Interfaces.IMemory mem, long ptr)
         {
             try { return ptr != 0 ? mem.ReadStringU(ptr) ?? "" : ""; } catch { return ""; }
         }
