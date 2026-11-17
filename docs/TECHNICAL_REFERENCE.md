@@ -26,7 +26,7 @@ Offsets are relative to the 160-byte (`0xA0`) member state unless stated. "Code"
 | M-VEC | Member state vector: start `panel+0x3F8`, end `panel+0x400`, entry size 160 | M, int64 x2 | same four functions | M-NAME..M-PRISON | State vector (panel+0x3F8) | verified (15 entries, 14 before Janus appeared) |
 | M-NAME | Member name | `state+0x08` -> ptr P; `*(P)` -> UTF-16 string ptr -> `ReadStringU` | `updateSyndicateInfo` | all scoring, overview, overlay | Member names | verified |
 | M-JOB | Division of the member | `state+0x18` -> ptr J; `*(J+0x08)` -> UTF-16 string: `Transportation`/`Fortification`/`Research`/`Intervention`/`None` (`None` = outside) | `updateSyndicateInfo`, `ReadDivisionIntel` | scoring (`GetScore`), overview columns | Divisions (job) | verified |
-| M-RANK | Rank 0-3 | `state+0x28` -> ptr R; `int32 *(R+0x10)` | `updateSyndicateInfo` | scoring, overview, Execute | Ranks | verified |
+| M-RANK | Rank 0-3 | `state+0x28` -> ptr R; `int32 *(R+0x10)` is **inverted**: record 1 = Captain (rank 3), 2 = Lieutenant (2), 3 = Sergeant (1), 0 = outside. `DecodeRank` maps it; verified on 8 cards by stars/title | `updateSyndicateInfo` | scoring, overview, Execute | Ranks | verified |
 | M-LEADER | Division leader flag | index in vector `< 4` (first four entries are the leaders, one per division) | `updateSyndicateInfo` (`isLeader = i < 4`), `ReadDivisionIntel` | overview highlight, intel | Leaders (first 4 entries) | verified on live data (assumption: ordering); breaks if leaders stop being first |
 | M-INTEL | Safehouse intelligence 0-100 of the leader's division | `int32 state+0x84`, only for the first 4 entries | `ReadDivisionIntel` | ready banner, safehouse window (`checkIntel`), intel scoring, overview bars | Safehouse intel (leader+0x84) | verified (Tora 72 -> 78 after +6) |
 | M-PRISON | Turns left in prison (1-3, 0 = free) | `int32 state+0x94` | `ReadPrisonersFromMemory` | Interrogate blocked at 3/3 (`ReadInterrogationQueueFull`) | Prisoners (state+0x94) | verified with 0, 1, 2 prisoners |
@@ -119,6 +119,20 @@ Fixed `0`. Wins when both other groups are `<= 0`.
 ### 2.9 Atlas nodes
 
 Source: poedb Atlas passive tree, Betrayal mastery. Only two nodes change decisions: Enduring Legacy (`+50%` extra rank on Execute) and Unconditional Release (`30%` keep rank on Interrogate). The other nodes (Head of the Snake, Hidden Flank, Hard Bargain, Coercive Interrogation, drop/rarity/reinforcement/bargain small nodes) are intentionally not modelled. Test of Loyalty and Lethal Extraction no longer exist.
+
+### 2.10 History and statistics (`HistoryLogger`, `RecordBoardHistory`, `BuildPlanSnapshot`)
+
+Folder: `D:
+igus.30\config\BetrayalHelper\history\` (HUD `ConfigDirectory`), toggle `RecordHistory`. Append-only JSON lines:
+
+| File | Content |
+|---|---|
+| `board.jsonl` | `baseline` of the whole board, then every change: `job`, `rank`, `leader`, `prison`, `intel`, `relation_added/removed`, `member_appeared/disappeared`; each has `eventId` when it happens within 15 s of an encounter choice (so a choice can be joined to its effect) |
+| `decisions.jsonl` | one `decision` per event (action id, text, member, job, rank, placement score, every outcome group with its components, recommendation, settings incl. effective Run per division and Atlas toggles, plan snapshot) and an `event_closed` marker |
+| `plan.jsonl` | plan-vs-reality snapshots (written after changes): per Farm division placed/target and rank sum/max, filler count, intel per division, prisoners, relation groups (Rival/Trusted cross-group vs same-group), members off board |
+| `stats.json` | running counters: `decisions.total`, `decisions.recommended.<Action>`, `decisions.event.<EventId>.recommended.<Action>`, `changes.<field>`, `events.closed`, `areas`, `sessions` |
+
+The chosen button is not read directly; it is inferred from the board changes that follow the event (same `eventId`). Compare `recommended` with the resulting changes to measure how often the advice is followed and what it yields.
 
 ## 3. Failure -> likely cause -> repair
 

@@ -26,6 +26,8 @@ namespace BetrayalHelper
         List<BetrayalMaster> ListBetrayalMasters = new List<BetrayalMaster>();
         bool badJobsAreFull = false;
         bool _memoryReadOk = true;
+        HistoryLogger? _history;
+        long _lastBoardLogTick;
         Dictionary<string, Dictionary<string, string>>? _lastRelationships;
         long _lastRelationshipsTick;
         bool hasClosedWindow = false;
@@ -127,11 +129,19 @@ namespace BetrayalHelper
         {
             Name = "BetrayalHelper";
             NormalizeSettingsNames();
+            try { if (Settings.RecordHistory.Value) _history = new HistoryLogger(ConfigDirectory); } catch { }
             LogMessage("BetrayalHelper build: intel-follows-run-policy (2026-11-17)", 5, Color.Green);
             return true;
         }
 
         /// <summary>Engine uses "ItThatFled"; UI/settings use "It That Fled". Compare using one form.</summary>
+        /// <summary>
+        /// The int at rankRecord+0x10 is NOT the rank: it is inverted (record 1 = Captain, 3 = Sergeant).
+        /// Verified against the cards (stars): Gravicius Sergeant=3, Cameria Captain=1, Vagan 3 -> 1 star, Korell 1 -> 3 stars.
+        /// Game rank: 0 outside, 1 Sergeant, 2 Lieutenant, 3 Captain. Unknown values -> -1 (System tab FAIL).
+        /// </summary>
+        private static int DecodeRank(int raw) => raw switch { 0 => 0, 1 => 3, 2 => 2, 3 => 1, _ => -1 };
+
         private static string NormalizeName(string name)
         {
             if (string.IsNullOrWhiteSpace(name)) return "";
@@ -168,6 +178,8 @@ namespace BetrayalHelper
 
         public override void AreaChange(AreaInstance area)
         {
+            _history?.Count("areas");
+            _history?.SaveStats(true);
             hasClosedWindow = false;
             _closedOverviewForCurrentPanel = false;
         }
@@ -213,7 +225,7 @@ namespace BetrayalHelper
                 string name = NormalizeName(ReadStateString(mem, namePtr));
                 long jobNamePtr = 0; try { jobNamePtr = jobPtr != 0 ? mem.Read<long>(jobPtr + 0x08) : 0; } catch { }
                 string job = jobNamePtr != 0 ? ReadStateString(mem, jobNamePtr) : "None";
-                try { rank = rankPtr != 0 ? mem.Read<int>(rankPtr + 0x10) : 0; } catch { }
+                try { rank = rankPtr != 0 ? DecodeRank(mem.Read<int>(rankPtr + 0x10)) : 0; } catch { }
                 names.Add(name); jobs.Add(job); ranks.Add(rank); intels.Add(intel);
             }
 
@@ -283,6 +295,13 @@ namespace BetrayalHelper
             var notOnBoard = configured.Where(c => !names.Contains(c)).ToList();
             rows.Add(new SystemCheck("Configured members", notOnBoard.Count == 0 ? "OK" : "WARN",
                 notOnBoard.Count == 0 ? $"all {configured.Count} configured members found on board" : $"not on board: {string.Join(", ", notOnBoard)}"));
+            if (_history != null)
+            {
+                long Cn(string k) => _history.Counters.TryGetValue(k, out var v) ? v : 0;
+                long changesTotal = _history.Counters.Where(kv => kv.Key.StartsWith("changes.")).Sum(kv => kv.Value);
+                rows.Add(new SystemCheck("History log", Settings.RecordHistory.Value ? "OK" : "N/A",
+                    $"{_history.Directory} | decisions {Cn("decisions.total")}, board changes {changesTotal}, events closed {Cn("events.closed")}, sessions {Cn("sessions")}"));
+            }
             return rows;
         }
 
@@ -1215,9 +1234,13 @@ namespace BetrayalHelper
             if (syndicatePanel?.IsVisible == true)
             {
                 DrawSyndicateBoard(syndicatePanel);
+                bool eventVisible = false;
+                try { eventVisible = (syndicatePanel.EventElement ?? syndicatePanel.BetrayalEventData)?.IsVisible == true; } catch { }
+                if (!eventVisible) _history?.EventClosed();
             }
             else
             {
+                _history?.EventClosed();
                 _closedOverviewForCurrentPanel = false;
                 // A later encounter may have identical text and member names but
                 // a different prisoner count, so invalidate between panel opens.
@@ -1667,7 +1690,7 @@ namespace BetrayalHelper
                             long jobNamePtr = jobPtr != 0 ? mem.Read<long>(jobPtr + 0x08) : 0;
                             string job = jobNamePtr != 0 ? mem.ReadStringU(jobNamePtr) : "None";
 
-                            int rank = rankPtr != 0 ? mem.Read<int>(rankPtr + 0x10) : 0;
+                            int rank = rankPtr != 0 ? DecodeRank(mem.Read<int>(rankPtr + 0x10)) : 0;
                             bool isLeader = i < 4;
 
                             if (string.IsNullOrEmpty(name) || !allMasters.Contains(name))
@@ -1721,7 +1744,89 @@ namespace BetrayalHelper
                     .ToList();
 
                 UpdateReadySafehouses();
+                RecordBoardHistory();
             }
+        }
+
+        private void RecordBoardHistory()
+        {
+            if (_history == null || !Settings.RecordHistory.Value) return;
+            long now = Environment.TickCount64;
+            if (now - _lastBoardLogTick < 500) return;
+            _lastBoardLogTick = now;
+            try
+            {
+                var snap = new BoardSnapshot();
+                var prisoners = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+                foreach (var pr in ReadPrisonersFromMemory()) prisoners[pr.Name] = pr.TurnsLeft;
+                foreach (var m in ListBetrayalMasters)
+                {
+                    snap.Members[m.Name] = new HistoryMember
+                    {
+                        Job = m.Job,
+                        Rank = m.Rank,
+                        Leader = m.IsLeader,
+                        PrisonTurns = prisoners.TryGetValue(m.Name, out var turns) ? turns : 0
+                    };
+                    foreach (var rel in m.RelationshipStatuses)
+                    {
+                        string a = m.Name, b = rel.Key;
+                        if (string.Compare(a, b, StringComparison.OrdinalIgnoreCase) > 0) (a, b) = (b, a);
+                        snap.Relations.Add($"{a}|{b}|{rel.Value}");
+                    }
+                }
+                foreach (var kv in ReadDivisionIntel()) snap.Intel[kv.Key] = kv.Value;
+
+                int changes = _history.RecordBoard(snap, GameController?.Area?.CurrentArea?.Name ?? "");
+                if (changes > 0) _history.RecordPlan(BuildPlanSnapshot());
+                _history.SaveStats();
+            }
+            catch { }
+        }
+
+        /// <summary>Plan-vs-reality snapshot: how close the board is to the configured 5-5-2-2 plan.</summary>
+        private object BuildPlanSnapshot()
+        {
+            var farm = new List<object>();
+            foreach (var kv in GetRequiredMemberDivisions())
+            {
+                int placed = 0, rankSum = 0;
+                var detail = new List<string>();
+                foreach (var name in kv.Value)
+                {
+                    var bm = ListBetrayalMasters.FirstOrDefault(x => x.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+                    bool ok = bm != null && bm.Job == kv.Key;
+                    if (ok) { placed++; rankSum += bm!.Rank; }
+                    detail.Add($"{name}:{(bm == null ? "off board" : bm.Job)}:R{bm?.Rank ?? 0}");
+                }
+                farm.Add(new { division = kv.Key, target = kv.Value.Count, placed, rankSum, rankMax = 3 * kv.Value.Count, members = detail });
+            }
+
+            int filler = ListBetrayalMasters.Count(m => Settings.DivisionRoles.TryGetValue(m.Job ?? "", out var r) && r == "Filler");
+            int rivalCross = 0, trustedCross = 0, rivalSame = 0, trustedSame = 0, otherLinks = 0;
+            foreach (var link in GetUniqueRelationships())
+            {
+                var first = ListBetrayalMasters.FirstOrDefault(m => m.Name == link.First);
+                var second = ListBetrayalMasters.FirstOrDefault(m => m.Name == link.Second);
+                Settings.DivisionRoles.TryGetValue(first?.Job ?? "", out var r1);
+                Settings.DivisionRoles.TryGetValue(second?.Job ?? "", out var r2);
+                bool cross = (r1 == "Farm" && r2 == "Filler") || (r1 == "Filler" && r2 == "Farm");
+                bool same = !string.IsNullOrEmpty(r1) && r1 == r2;
+                if (link.Status == "Rival") { if (cross) rivalCross++; else if (same) rivalSame++; else otherLinks++; }
+                else if (link.Status == "Trusted") { if (cross) trustedCross++; else if (same) trustedSame++; else otherLinks++; }
+            }
+
+            int prisoners = 0;
+            try { prisoners = ReadPrisonersFromMemory().Count; } catch { }
+            return new
+            {
+                farm,
+                fillerPlaced = filler,
+                intel = ReadDivisionIntel(),
+                prisoners,
+                relations = new { rivalCross, trustedCross, rivalSame, trustedSame, otherLinks },
+                offBoard = allMasters.Count(n => !ListBetrayalMasters.Any(m => m.Name == n))
+            };
         }
 
         private void DrawSyndicateBoard(SyndicatePanel syndicatePanel)
@@ -3513,6 +3618,45 @@ namespace BetrayalHelper
 
             foreach (var g in outcomes.GroupBy(o => o.Action))
                 LogMessage($"Group {g.Key}: total {g.Sum(o => o.Score)} [{string.Join("; ", g.Select(o => $"{o.Score}: {o.Description}"))}]", 5, Color.BlueViolet);
+            if (_history != null && Settings.RecordHistory.Value)
+            {
+                try
+                {
+                    string eventKey = $"{_eventAction}|{_masterText}|{_eventText}";
+                    long eventId = _history.BeginEvent(eventKey);
+                    var groupRecords = outcomes.GroupBy(o => o.Action).ToDictionary(
+                        g => g.Key.ToString(),
+                        g => (object)new { total = g.Sum(o => o.Score), items = g.Select(o => new { score = o.Score, text = o.Description }).ToList() });
+                    string recommended = topGroup.ActionType.ToString();
+                    string signature = eventKey + "|" + recommended + "|" + string.Join(",", outcomes.GroupBy(o => o.Action).Select(g => g.Key + ":" + g.Sum(o => o.Score)));
+                    _history.RecordDecision(signature, new
+                    {
+                        t = DateTime.Now.ToString("yyyy-MM-dd'T'HH:mm:ss.fff"),
+                        type = "decision",
+                        eventId,
+                        action = _eventAction,
+                        text = _eventText,
+                        member = _masterText,
+                        job = _eventMaster?.Job,
+                        rank = _eventMaster?.Rank,
+                        placementScore = _eventMaster?.Score,
+                        recommended,
+                        recommendedTotal = topGroup.TotalScore,
+                        groups = groupRecords,
+                        prisonQueueFull = interrogationQueueFull,
+                        settings = new
+                        {
+                            mode = Settings.FarmingMode.ToString(),
+                            run = new[] { "Transportation", "Fortification", "Research", "Intervention" }.ToDictionary(d => d, d => ShouldRunDivision(d)),
+                            enduringLegacy = Settings.EnduringLegacy.Value,
+                            unconditionalRelease = Settings.UnconditionalRelease.Value
+                        },
+                        plan = BuildPlanSnapshot()
+                    }, recommended, _eventAction ?? "Unknown");
+                }
+                catch { }
+            }
+
             LogMessage($"ActionType with highest score: {topGroup.ActionType}, Total Score: {topGroup.TotalScore}", 5, Color.BlueViolet);
             LogMessage("Matching Outcomes:", 5, Color.BlueViolet);
 

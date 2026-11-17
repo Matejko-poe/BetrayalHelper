@@ -15,6 +15,10 @@ Technical data map (every data source, formulas, repair guide): [docs/TECHNICAL_
 
 Memory only. The plugin reads the Syndicate board from game memory (state vector at `SyndicatePanel + 0x3F8`, stride 160). It never infers data from card positions or UI layout. If the read fails it says so and stops recommending.
 
+## History and statistics
+
+The plugin records board changes, every decision and plan-vs-reality snapshots to `config/BetrayalHelper/history/` (see docs/TECHNICAL_REFERENCE.md 2.10). Disable with `RecordHistory`.
+
 ## System tab
 
 Plugin settings > `System` shows which memory reads currently work (OK/FAIL/WARN/N/A). Use it first when recommendations look wrong, especially after a game patch.

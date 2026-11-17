@@ -14,7 +14,7 @@ Verified live on 2026-11-17 with the WhatsAnAiBridge (`tools/intel_snap.py` befo
 |---|---|---|---|
 | `+0x08` | ptr | target object; `*ptr` = UTF-16 name pointer (`ItThatFled` is normalized to `It That Fled`) | verified |
 | `+0x18` | ptr | job object; `+0x08` = UTF-16 division name (`Transportation`, `Fortification`, `Research`, `Intervention`, `None`) | verified |
-| `+0x28` | ptr | rank object; int32 at `+0x10` = rank 0-3 | verified |
+| `+0x28` | ptr | rank record; int32 at `+0x10` is INVERTED: 1 = Captain (rank 3), 2 = Lieutenant (2), 3 = Sergeant (1), 0 = outside | verified on 8 cards (stars/title) |
 | `+0x84` | int32 | safehouse intelligence 0-100, meaningful for the 4 leaders (Tora 72 -> 78 after a +6 event) | verified |
 | `+0x94` | int32 | imprisonment turns left (1-3), 0 when free. Gravicius 3, Guff 3, others 0 | verified with 1 and 2 prisoners (turn countdown not yet observed) |
 | `+0x74` | int32 | same value as `+0x94` for prisoners | observed, unused |

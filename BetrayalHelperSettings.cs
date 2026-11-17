@@ -38,6 +38,8 @@ namespace BetrayalHelper
         public ToggleNode DebugMode { get; set; }
         public ToggleNode MegaDebugMode { get; set; }
         public ToggleNode ShowBoardOverview { get; set; }
+        // Append board changes, decisions and plan snapshots to ConfigDirectory/history (jsonl + stats.json).
+        public ToggleNode RecordHistory { get; set; } = new ToggleNode(true);
         // Show #1/#2/#3 click-order labels above encounter members (frames always stay).
         public ToggleNode ShowPriorityOrder { get; set; } = new ToggleNode(true);
         public ButtonNode ReloadRules { get; set; } = new ButtonNode();
