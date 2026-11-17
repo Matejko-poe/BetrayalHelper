@@ -267,8 +267,8 @@ namespace BetrayalHelper
             try
             {
                 var pr = ReadPrisonersFromMemory();
-                rows.Add(new SystemCheck("Prisoners (state+0x94)", "WARN",
-                    $"{pr.Count}/3: {(pr.Count == 0 ? "none" : string.Join(", ", pr.Select(x => $"{x.Name} ({x.TurnsLeft} turns left)")))} - provisional, verified with 2 prisoners; turn tick not yet confirmed"));
+                rows.Add(new SystemCheck("Prisoners (state+0x94)", "OK",
+                    $"{pr.Count}/3: {(pr.Count == 0 ? "none" : string.Join(", ", pr.Select(x => $"{x.Name} ({x.TurnsLeft} turns left)")))} (verified with 1 and 2 prisoners)"));
             }
             catch { rows.Add(new SystemCheck("Prisoners (state+0x94)", "FAIL", "read failed")); }
 

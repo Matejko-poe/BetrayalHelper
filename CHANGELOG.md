@@ -20,7 +20,7 @@ All notable changes to BetrayalHelper are documented here. The format follows Ke
 ### Added
 - Settings tab **System**: live table of every memory read (panel, state vector, names, roster, divisions, leaders, ranks, safehouse intel, relationships, encounter event, prisoner count, configured members) with OK / FAIL / WARN / N/A and details.
 
-- Prisoner count from memory: state+0x94 = imprisonment turns left (observed 3 for both Gravicius and Guff, 0 for everyone else; state+0x90 differs per prisoner and is unused). Provisional; WARN in the System tab until the turn tick is confirmed.
+- Prisoner count from memory: state+0x94 = imprisonment turns left (observed 3 for both Gravicius and Guff, 0 for everyone else; state+0x90 differs per prisoner and is unused). Confirmed against the game with 1 and 2 prisoners (OK in the System tab); the turn countdown itself is not yet observed.
 
 ### Removed
 - All UI-tree / screen-position fallbacks (card coordinates, `Position.Y > 1700` prisoner check, `SyndicateStates` wrapper, safehouse UI-element signal). Game memory is the only data source; if the board memory cannot be read, a red "MEMORY READ FAILED" window appears and recommendations are blocked.
