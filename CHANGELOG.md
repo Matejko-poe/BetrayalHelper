@@ -17,6 +17,7 @@ All notable changes to BetrayalHelper are documented here. The format follows Ke
 - Interrogate payoff for kicking an intruder out is scaled by (1 - keep-rank chance).
 
 ### Fixed
+- `ShouldRunDivision` ignored the per-division Run/Skip setting and returned the Farm role; Run is authoritative again (this is what made Release win over +4 Research Intelligence).
 - Board Overview layout: divisions in one row, Outside and Farm Targets below; leader shown by row highlight; all UI text in English.
 - Raw action label (e.g. NPCBEFRIENDSANOTHER) over the recommended button is now debug-only.
 - "ItThatFled" in saved settings never matched "It That Fled" from the board; names are now normalized on load.

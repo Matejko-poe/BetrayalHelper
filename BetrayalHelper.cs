@@ -124,6 +124,7 @@ namespace BetrayalHelper
         {
             Name = "BetrayalHelper";
             NormalizeSettingsNames();
+            LogMessage("BetrayalHelper build: intel-follows-run-policy (2026-11-17)", 5, Color.Green);
             return true;
         }
 
@@ -700,7 +701,10 @@ namespace BetrayalHelper
             if (Settings.FarmingMode == FarmingMode.CatarinaFocus)
                 return true;
 
-            return IsFarmDivision(division);
+            // The per-division Run/Skip setting is authoritative; Farm role is only the fallback.
+            return Settings.DivisionShouldRun.TryGetValue(division, out var shouldRun)
+                ? shouldRun
+                : IsFarmDivision(division);
         }
 
         /// <summary>
@@ -3719,6 +3723,8 @@ namespace BetrayalHelper
             _lastRecommendedAction = topGroup.ActionType;
             _lastRecommendedScore = topGroup.TotalScore;
 
+            foreach (var g in outcomes.GroupBy(o => o.Action))
+                LogMessage($"Group {g.Key}: total {g.Sum(o => o.Score)} [{string.Join("; ", g.Select(o => $"{o.Score}: {o.Description}"))}]", 5, Color.BlueViolet);
             LogMessage($"ActionType with highest score: {topGroup.ActionType}, Total Score: {topGroup.TotalScore}", 5, Color.BlueViolet);
             LogMessage("Matching Outcomes:", 5, Color.BlueViolet);
 
