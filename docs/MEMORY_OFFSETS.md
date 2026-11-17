@@ -1,5 +1,7 @@
 # Memory offsets used by BetrayalHelper
 
+Full data map with formulas and repair guide: [TECHNICAL_REFERENCE.md](TECHNICAL_REFERENCE.md).
+
 All reads are read-only (`GameController.Memory.Read<T>`). The plugin uses memory only: no UI-position or wrapper fallbacks. The **System** tab in the plugin settings shows which of these reads currently work.
 
 Verified live on 2026-11-17 with the WhatsAnAiBridge (`tools/intel_snap.py` before/after snapshots).

@@ -9,7 +9,7 @@ The plugin is designed primarily for a classic **5-5-2-2 board**: two compact re
 > [!IMPORTANT]
 > BetrayalHelper is a decision-support overlay. It does not click buttons, automate encounters, or modify game memory.
 
-Offsets and how they were found: [docs/MEMORY_OFFSETS.md](docs/MEMORY_OFFSETS.md).
+Technical data map (every data source, formulas, repair guide): [docs/TECHNICAL_REFERENCE.md](docs/TECHNICAL_REFERENCE.md). Offset history: [docs/MEMORY_OFFSETS.md](docs/MEMORY_OFFSETS.md).
 
 ## Design rule
 
