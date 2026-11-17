@@ -444,7 +444,7 @@ namespace BetrayalHelper
             ImGui.Text($"STRATEGY: {modeName.ToUpper()}");
             ImGui.PopStyleColor();
             ImGui.SameLine();
-            ImGui.TextDisabled($"| Syndicate panel: {(panelVisible ? "VISIBLE" : "CLOSED")} | Cached: {ListBetrayalMasters.Count}/14");
+            ImGui.TextDisabled($"| Syndicate panel: {(panelVisible ? "VISIBLE" : "CLOSED")} | Cached: {ListBetrayalMasters.Count}/{allMasters.Count}");
 
             // Calculate strategic KPIs
             int readyFarmCount = ListBetrayalMasters.Count(m => m.GoalStatus == "READY" && m.Score >= 30);
@@ -1062,7 +1062,7 @@ namespace BetrayalHelper
 
                 // Collect all visible NPCs with rects and scores, then sort by priority
                 var visibleNpcs = new List<(BetrayalMaster master, RectangleF frameRect, RectangleF nameRect)>();
-                foreach (var label in betrayalLabels)
+                foreach (var label in betrayalLabels ?? Enumerable.Empty<LabelOnGround>())
                 {
                     var nameElement = label.Label.GetChildFromIndices(0, 0);
                     if (nameElement == null) continue;
@@ -2125,7 +2125,8 @@ namespace BetrayalHelper
                     var numMastersCurrentlyOnThisJob = ListBetrayalMasters.Count(mw => mw.Job == _jobEvent);
                     //var noSpaceForThisMaster = (numMastersCurrentlyOnThisJob + (numMastersWithThisJobAsInterest - numInterestMastersCurrentlyOnThisJob) - 2) > 0;
 
-                    var noSpaceForThisMaster = numMastersCurrentlyOnThisJob >= 2 || (numMastersCurrentlyOnThisJob - numInterestMastersCurrentlyOnThisJob) >= 2;
+                    int farmCapacity = Math.Max(1, numMastersWithThisJobAsInterest);
+                    var noSpaceForThisMaster = numMastersCurrentlyOnThisJob >= farmCapacity || (numMastersCurrentlyOnThisJob - numInterestMastersCurrentlyOnThisJob) >= farmCapacity;
 
 
 
@@ -2296,7 +2297,8 @@ namespace BetrayalHelper
                                     var numInterestMastersCurrentlyOnThisMoveJob = ListBetrayalMasters.Count(mw => mw.Job == jobToMove && mw.Score > 1);
                                     //var noMoveSpaceForThisMaster = (numMastersCurrentlyOnThisMoveJob + (numMastersWithThisMoveJobAsInterest - numInterestMastersCurrentlyOnThisMoveJob) - 2) > 0;
 
-                                    var noMoveSpaceForThisMaster = numMastersCurrentlyOnThisMoveJob >= 2 || (numMastersCurrentlyOnThisMoveJob - numInterestMastersCurrentlyOnThisMoveJob) >= 2;
+                                    int moveCapacity = Math.Max(1, numMastersWithThisMoveJobAsInterest);
+                                    var noMoveSpaceForThisMaster = numMastersCurrentlyOnThisMoveJob >= moveCapacity || (numMastersCurrentlyOnThisMoveJob - numInterestMastersCurrentlyOnThisMoveJob) >= moveCapacity;
                                     /// 2 -2 + 2
                                     if (Settings.DebugMode)
                                     {
