@@ -267,10 +267,10 @@ namespace BetrayalHelper
             try
             {
                 var pr = ReadPrisonersFromMemory();
-                rows.Add(new SystemCheck("Prisoners (state+0x90/+0x94)", "WARN",
-                    $"{pr.Count}/3: {(pr.Count == 0 ? "none" : string.Join(", ", pr.Select(x => $"{x.Name} ({x.TurnsLeft} turns left)")))} - provisional, verified with 1 prisoner only"));
+                rows.Add(new SystemCheck("Prisoners (state+0x94)", "WARN",
+                    $"{pr.Count}/3: {(pr.Count == 0 ? "none" : string.Join(", ", pr.Select(x => $"{x.Name} ({x.TurnsLeft} turns left)")))} - provisional, verified with 2 prisoners; turn tick not yet confirmed"));
             }
-            catch { rows.Add(new SystemCheck("Prisoners (state+0x90/+0x94)", "FAIL", "read failed")); }
+            catch { rows.Add(new SystemCheck("Prisoners (state+0x94)", "FAIL", "read failed")); }
 
             var configured = Settings.DivisionMembers.Values.SelectMany(x => x).Distinct().ToList();
             var notOnBoard = configured.Where(c => !names.Contains(c)).ToList();
@@ -3597,9 +3597,9 @@ namespace BetrayalHelper
         }
 
         /// <summary>
-        /// Prisoners from the board state vector: state+0x90 = 1 (imprisoned) with state+0x94 = turns left.
-        /// Found with a before/after snapshot (Gravicius interrogated: 0/0 -> 1/3). Provisional until
-        /// verified with 2-3 prisoners and a turn tick.
+        /// Prisoners from the board state vector: state+0x94 = imprisonment turns left (1-3, 0 = free).
+        /// Observed: Gravicius 3, Guff 3, everyone else 0. state+0x90 differs per prisoner (1, 4), probably
+        /// the division receiving intel, and is not used. Verify the turn tick after the next encounter.
         /// </summary>
         private List<(string Name, int TurnsLeft)> ReadPrisonersFromMemory()
         {
@@ -3614,9 +3614,8 @@ namespace BetrayalHelper
             for (int i = 0; i < n; i++)
             {
                 long st = start + i * 160;
-                int flag = mem.Read<int>(st + 0x90);
                 int turns = mem.Read<int>(st + 0x94);
-                if (flag != 1 || turns <= 0 || turns > 10) continue;
+                if (turns <= 0 || turns > 3) continue;
                 long targetPtr = mem.Read<long>(st + 0x08);
                 long namePtr = targetPtr != 0 ? mem.Read<long>(targetPtr) : 0;
                 result.Add((NormalizeName(ReadStateString(mem, namePtr)), turns));
