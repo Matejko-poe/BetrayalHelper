@@ -16,6 +16,9 @@ All notable changes to BetrayalHelper are documented here. The format follows Ke
 - Execute promote score uses expected rank gain (1 + extra-rank chance, capped at R3) instead of a rounded rank jump.
 - Interrogate payoff for kicking an intruder out is scaled by (1 - keep-rank chance).
 
+### Added
+- Settings tab **System**: live table of every memory read (panel, state vector, names, roster, divisions, leaders, ranks, safehouse intel, relationships, encounter event, prisoner count, configured members) with OK / FAIL / WARN / N/A and details.
+
 ### Removed
 - All UI-tree / screen-position fallbacks (card coordinates, `Position.Y > 1700` prisoner check, `SyndicateStates` wrapper, safehouse UI-element signal). Game memory is the only data source; if the board memory cannot be read, a red "MEMORY READ FAILED" window appears and recommendations are blocked.
 - Prisoner count (3/3 queue) is currently not read (no verified offset); Interrogate stays selectable until the offset is mapped.

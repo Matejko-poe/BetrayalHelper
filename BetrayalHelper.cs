@@ -170,6 +170,151 @@ namespace BetrayalHelper
             _closedOverviewForCurrentPanel = false;
         }
 
+        private record SystemCheck(string Name, string Status, string Detail);
+
+        private string ReadStateString(IMemory mem, long ptr)
+        {
+            try { return ptr != 0 ? mem.ReadStringU(ptr) ?? "" : ""; } catch { return ""; }
+        }
+
+        /// <summary>Verifies every memory read the plugin depends on. Statuses: OK, FAIL, WARN, N/A.</summary>
+        private List<SystemCheck> RunSystemChecks()
+        {
+            var rows = new List<SystemCheck>();
+            var ingame = GameController?.Game?.IngameState;
+            var panel = ingame?.IngameUi?.SyndicatePanel;
+            var mem = GameController?.Memory;
+            if (panel == null || mem == null || panel.Address == 0)
+            {
+                rows.Add(new SystemCheck("Syndicate panel", "FAIL", "panel object or memory interface unavailable (not in game?)"));
+                return rows;
+            }
+            rows.Add(new SystemCheck("Syndicate panel", "OK", $"address 0x{panel.Address:X}, board {(panel.IsVisible ? "open" : "closed")}"));
+
+            long start = 0, end = 0;
+            try { start = mem.Read<long>(panel.Address + 0x3F8); end = mem.Read<long>(panel.Address + 0x400); } catch { }
+            long len = end - start;
+            bool vecOk = start != 0 && len > 0 && len % 160 == 0 && len / 160 <= 40;
+            rows.Add(new SystemCheck("State vector (panel+0x3F8)", vecOk ? "OK" : "FAIL",
+                vecOk ? $"{len / 160} entries, stride 160 B" : $"start=0x{start:X} end=0x{end:X} length={len} (offset moved by a patch, or open the board once)"));
+            if (!vecOk)
+                return rows;
+
+            int n = (int)(len / 160);
+            var names = new List<string>(); var jobs = new List<string>(); var ranks = new List<int>(); var intels = new List<int>();
+            for (int i = 0; i < n; i++)
+            {
+                long st = start + i * 160;
+                long targetPtr = 0, jobPtr = 0, rankPtr = 0; int intel = -1, rank = -1;
+                try { targetPtr = mem.Read<long>(st + 0x08); jobPtr = mem.Read<long>(st + 0x18); rankPtr = mem.Read<long>(st + 0x28); intel = mem.Read<int>(st + 0x84); } catch { }
+                long namePtr = 0; try { namePtr = targetPtr != 0 ? mem.Read<long>(targetPtr) : 0; } catch { }
+                string name = NormalizeName(ReadStateString(mem, namePtr));
+                long jobNamePtr = 0; try { jobNamePtr = jobPtr != 0 ? mem.Read<long>(jobPtr + 0x08) : 0; } catch { }
+                string job = jobNamePtr != 0 ? ReadStateString(mem, jobNamePtr) : "None";
+                try { rank = rankPtr != 0 ? mem.Read<int>(rankPtr + 0x10) : 0; } catch { }
+                names.Add(name); jobs.Add(job); ranks.Add(rank); intels.Add(intel);
+            }
+
+            var unknownNames = names.Where(x => !allMasters.Contains(x)).ToList();
+            rows.Add(new SystemCheck("Member names", unknownNames.Count == 0 ? "OK" : "FAIL",
+                unknownNames.Count == 0 ? $"{n}/{n} resolved" : $"unresolved: {string.Join(", ", unknownNames.Select(x => string.IsNullOrEmpty(x) ? "<empty>" : x))}"));
+
+            var missing = allMasters.Where(m => !names.Contains(m)).ToList();
+            rows.Add(new SystemCheck("Roster", missing.Count == 0 ? "OK" : "WARN",
+                missing.Count == 0 ? "all known members on board" : $"{n}/{allMasters.Count} on board; not on board: {string.Join(", ", missing)}"));
+
+            var validJobs = new HashSet<string> { "Transportation", "Fortification", "Research", "Intervention", "None" };
+            var badJobs = jobs.Where(j => !validJobs.Contains(j)).Distinct().ToList();
+            rows.Add(new SystemCheck("Divisions (job)", badJobs.Count == 0 ? "OK" : "FAIL",
+                badJobs.Count == 0 ? $"{jobs.Count(j => j != "None")} placed, {jobs.Count(j => j == "None")} outside" : $"unknown names: {string.Join(", ", badJobs)}"));
+
+            var leaderJobs = jobs.Take(4).Where(j => j != "None").Distinct().ToList();
+            bool leadersOk = n >= 4 && leaderJobs.Count == 4;
+            rows.Add(new SystemCheck("Leaders (first 4 entries)", leadersOk ? "OK" : "FAIL",
+                leadersOk ? string.Join(", ", Enumerable.Range(0, 4).Select(i => $"{jobs[i]}: {names[i]}")) : "first 4 entries are not 4 distinct divisions"));
+
+            var badRanks = Enumerable.Range(0, n).Where(i => ranks[i] < 0 || ranks[i] > 3).Select(i => $"{names[i]}={ranks[i]}").ToList();
+            rows.Add(new SystemCheck("Ranks", badRanks.Count == 0 ? "OK" : "FAIL",
+                badRanks.Count == 0 ? "all within 0-3" : $"out of range: {string.Join(", ", badRanks)}"));
+
+            var leaderIntel = Enumerable.Range(0, Math.Min(4, n)).Select(i => intels[i]).ToList();
+            bool intelOk = leaderIntel.Count == 4 && leaderIntel.All(v => v >= 0 && v <= 100);
+            rows.Add(new SystemCheck("Safehouse intel (leader+0x84)", intelOk ? "OK" : "FAIL",
+                intelOk ? string.Join(", ", Enumerable.Range(0, 4).Select(i => $"{jobs[i]} {intels[i]}")) : $"values out of 0-100: {string.Join(", ", leaderIntel)}"));
+
+            int relCount = -1;
+            try { relCount = ingame?.ServerData?.BetrayalMemberRelationships?.Count ?? -1; } catch { }
+            rows.Add(new SystemCheck("Relationships (ServerData)", relCount > 0 ? "OK" : "FAIL",
+                relCount > 0 ? $"{relCount} members with relation data" : "BetrayalMemberRelationships empty or unreadable"));
+
+            string evAction = ""; string evText = ""; string evName = ""; bool evVisible = false;
+            try
+            {
+                var ev = panel.EventElement ?? panel.BetrayalEventData;
+                evVisible = ev?.IsVisible == true;
+                if (evVisible) { evAction = ev.Action?.Id ?? ""; evText = ev.EventText ?? ""; evName = ev.Target2?.Name ?? ""; }
+            }
+            catch { }
+            if (!evVisible)
+                rows.Add(new SystemCheck("Encounter event", "N/A", "no choice window open (open an encounter to test)"));
+            else
+            {
+                bool evOk = evAction.Length > 0 && evText.Length > 0 && evName.Length > 0;
+                rows.Add(new SystemCheck("Encounter event", evOk ? "OK" : "FAIL",
+                    evOk ? $"{evName}: {evAction} / {evText}" : $"action='{evAction}' text='{evText}' member='{evName}'"));
+            }
+
+            rows.Add(new SystemCheck("Prisoner count (3/3)", "N/A", "memory offset not mapped yet; queue treated as not full"));
+
+            var configured = Settings.DivisionMembers.Values.SelectMany(x => x).Distinct().ToList();
+            var notOnBoard = configured.Where(c => !names.Contains(c)).ToList();
+            rows.Add(new SystemCheck("Configured members", notOnBoard.Count == 0 ? "OK" : "WARN",
+                notOnBoard.Count == 0 ? $"all {configured.Count} configured members found on board" : $"not on board: {string.Join(", ", notOnBoard)}"));
+            return rows;
+        }
+
+        private void DrawSystemTab()
+        {
+            ImGui.TextWrapped("Live check of every game-memory read this plugin depends on. The plugin works from memory only: if a row is FAIL, recommendations that rely on it are unreliable.");
+            ImGui.Spacing();
+            List<SystemCheck> rows;
+            try { rows = RunSystemChecks(); }
+            catch (Exception ex) { rows = new List<SystemCheck> { new SystemCheck("System check", "FAIL", ex.Message) }; }
+
+            int fail = rows.Count(r => r.Status == "FAIL"), warn = rows.Count(r => r.Status == "WARN");
+            var sumColor = fail > 0 ? new System.Numerics.Vector4(1f, 0.3f, 0.3f, 1f) : warn > 0 ? new System.Numerics.Vector4(1f, 0.75f, 0.2f, 1f) : new System.Numerics.Vector4(0.3f, 1f, 0.4f, 1f);
+            ImGui.TextColored(sumColor, fail > 0 ? $"{fail} read(s) FAILED" : warn > 0 ? $"All reads OK, {warn} warning(s)" : "All reads OK");
+            ImGui.Spacing();
+
+            if (ImGui.BeginTable("##system_checks", 3, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp))
+            {
+                ImGui.TableSetupColumn("Data", ImGuiTableColumnFlags.WidthStretch, 1.3f);
+                ImGui.TableSetupColumn("Status", ImGuiTableColumnFlags.WidthStretch, 0.4f);
+                ImGui.TableSetupColumn("Detail", ImGuiTableColumnFlags.WidthStretch, 3.0f);
+                ImGui.TableHeadersRow();
+                foreach (var r in rows)
+                {
+                    ImGui.TableNextRow();
+                    ImGui.TableSetColumnIndex(0);
+                    ImGui.TextUnformatted(r.Name);
+                    ImGui.TableSetColumnIndex(1);
+                    var c = r.Status switch
+                    {
+                        "OK" => new System.Numerics.Vector4(0.3f, 1f, 0.4f, 1f),
+                        "FAIL" => new System.Numerics.Vector4(1f, 0.3f, 0.3f, 1f),
+                        "WARN" => new System.Numerics.Vector4(1f, 0.75f, 0.2f, 1f),
+                        _ => new System.Numerics.Vector4(0.6f, 0.6f, 0.6f, 1f)
+                    };
+                    ImGui.TextColored(c, r.Status);
+                    ImGui.TableSetColumnIndex(2);
+                    ImGui.PushTextWrapPos(0f);
+                    ImGui.TextUnformatted(r.Detail);
+                    ImGui.PopTextWrapPos();
+                }
+                ImGui.EndTable();
+            }
+        }
+
         public override void DrawSettings()
         {
             bool showConfiguration = false;
@@ -183,6 +328,11 @@ namespace BetrayalHelper
                 if (ImGui.BeginTabItem("Debug Stats"))
                 {
                     DrawDebugStatsTab();
+                    ImGui.EndTabItem();
+                }
+                if (ImGui.BeginTabItem("System"))
+                {
+                    DrawSystemTab();
                     ImGui.EndTabItem();
                 }
                 if (ImGui.BeginTabItem("FAQ"))

@@ -13,6 +13,10 @@ The plugin is designed primarily for a classic **5-5-2-2 board**: two compact re
 
 Memory only. The plugin reads the Syndicate board from game memory (state vector at `SyndicatePanel + 0x3F8`, stride 160). It never infers data from card positions or UI layout. If the read fails it says so and stops recommending.
 
+## System tab
+
+Plugin settings > `System` shows which memory reads currently work (OK/FAIL/WARN/N/A). Use it first when recommendations look wrong, especially after a game patch.
+
 ## Features
 
 - Reads members, divisions, ranks, leaders, typed Rival/Trusted relationships, safehouse intelligence, and the current encounter choice.
