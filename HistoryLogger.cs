@@ -44,6 +44,7 @@ namespace BetrayalHelper
         private string _lastEventKey = "";
         private string _lastDecisionSignature = "";
         private bool _eventOpen;
+        private bool _pendingAttach; // first board changes after an event closed belong to that event (board is read again only when reopened)
         private long _lastEventTick;
         private long _lastStatsSave;
 
@@ -116,6 +117,7 @@ namespace BetrayalHelper
         {
             if (!_eventOpen) return;
             _eventOpen = false;
+            _pendingAttach = true;
             _lastEventTick = Environment.TickCount64;
             Write("decisions.jsonl", new { t = Now(), type = "event_closed", eventId = _eventId });
             Count("events.closed");
@@ -141,7 +143,7 @@ namespace BetrayalHelper
         {
             int changes = 0;
             long sinceEvent = (_eventOpen || _eventId > 0) ? (Environment.TickCount64 - _lastEventTick) / 1000 : long.MaxValue;
-            long attach = (_eventOpen || sinceEvent <= 15) ? _eventId : 0;
+            long attach = (_eventOpen || _pendingAttach || sinceEvent <= 15) ? _eventId : 0;
 
             void Change(string field, string who, object? from, object? to)
             {
@@ -189,6 +191,7 @@ namespace BetrayalHelper
             foreach (var r in _prev.Relations.Where(r => !cur.Relations.Contains(r)))
                 Change("relation_removed", r, null, null);
 
+            if (changes > 0 && !_eventOpen) _pendingAttach = false;
             _prev = cur;
             return changes;
         }

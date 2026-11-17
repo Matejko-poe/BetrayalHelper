@@ -28,6 +28,7 @@ All notable changes to BetrayalHelper are documented here. The format follows Ke
 - All UI-tree / screen-position fallbacks (card coordinates, `Position.Y > 1700` prisoner check, `SyndicateStates` wrapper, safehouse UI-element signal). Game memory is the only data source; if the board memory cannot be read, a red "MEMORY READ FAILED" window appears and recommendations are blocked.
 
 ### Fixed
+- History: board changes seen on the next board open after an event closed (memory is read only while the board is open) are attributed to that event instead of `eventId 0`.
 - **Ranks were inverted.** The int at the rank record (`state+0x28` -> `+0x10`) is 1 for Captain and 3 for Sergeant; the plugin treated it as the rank, so Captains looked like Sergeants and vice versa (all rank/Execute/Interrogate decisions were affected). Now decoded with `DecodeRank`.
 - Intel into a division that is not run (Filler) is no longer penalised (-8 per point): it is free, worth +1 per useful point, so +4 Research beats Release but not real options. One helper (`BuildIntelOutcome`) now scores intel for both Gain Intelligence and Bargain events; Bargain intel was a flat 40/60 before.
 - Relationships: the ExileCore `BetrayalMemberRelationships` map works (verified: Aisling-Elreon became Trusted and appeared symmetrically) but is sometimes empty. The plugin now keeps the last non-empty snapshot; the System tab shows OK (live), WARN (cached) or FAIL (never read).
