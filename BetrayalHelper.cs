@@ -2037,14 +2037,14 @@ namespace BetrayalHelper
                     }
                     else
                     {
-                        _jobsToGainIntelligence = Settings.DivisionRoles
-                            .Where(kv => kv.Value == "Farm")
-                            .Select(kv => kv.Key)
+                        // Intel is wanted wherever the safehouse should be run (Run policy),
+                        // independent of Farm/Filler placement role.
+                        _jobsToGainIntelligence = Settings.DivisionRoles.Keys
+                            .Where(ShouldRunDivision)
                             .ToList();
 
-                        _jobsToNOTGainIntelligence = Settings.DivisionRoles
-                            .Where(kv => kv.Value == "Filler")
-                            .Select(kv => kv.Key)
+                        _jobsToNOTGainIntelligence = Settings.DivisionRoles.Keys
+                            .Where(div => !ShouldRunDivision(div))
                             .ToList();
                     }
 
@@ -2064,7 +2064,7 @@ namespace BetrayalHelper
                     // CHECK IF BAD JOBS ARE FULL
 
                     var countBadMastersInBadJobs = ListBetrayalMasters
-                        .Count(bm => _jobsToNOTGainIntelligence.Contains(bm.Job) && bm.Score == 1);
+                        .Count(bm => Settings.DivisionRoles.TryGetValue(bm.Job ?? "", out var badRole) && badRole == "Filler" && bm.Score == 1);
 
                     if (Settings.DebugMode)
                         LogMessage("countBadMastersInBadJobs " + countBadMastersInBadJobs, 5, Color.Coral);
@@ -2865,8 +2865,10 @@ namespace BetrayalHelper
                     int current = ReadDivisionIntel().TryGetValue(jobToCheck, out var cur) ? cur : 0;
                     int useful = Math.Clamp(Math.Min(gain, 100 - current), 0, 100);
                     int perPoint = Settings.FarmingMode == FarmingMode.CatarinaFocus ? 9 : 6;
-                    eventOutcome.Add(new Outcome(OutcomeType.GainInformationToInterestingJob, ActionType.Special, useful * perPoint,
-                        $" Gain +{gain} intelligence to {jobToCheck} ({current}/100, {useful} useful)"));
+                    // Completing the safehouse (reaching 100) is worth extra: it is the point of stacking intel.
+                    int completionBonus = (current + gain >= 100 && current < 100) ? 25 : 0;
+                    eventOutcome.Add(new Outcome(OutcomeType.GainInformationToInterestingJob, ActionType.Special, useful * perPoint + completionBonus,
+                        $" Gain +{gain} intelligence to {jobToCheck} ({current}/100, {useful} useful{(completionBonus > 0 ? ", completes safehouse" : "")})"));
                 }
                 else
                 {

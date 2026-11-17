@@ -10,6 +10,8 @@ All notable changes to BetrayalHelper are documented here. The format follows Ke
 - `tools/intel_snap.py` (in BetrayalHelperv2/tools) to snapshot/diff board memory.
 
 ### Changed (scoring)
+- Intelligence is now wanted wherever the safehouse should be run (Run policy), not only in Farm divisions. Previously +4 Research Intelligence was scored as -32 for a Filler division and Release won even with Research set to Run. Applies to Gain/Steal Intelligence and intel-bearing relationship/rank events.
+- Reaching 100 intel with an event adds a +25 completion bonus.
 - Gain Intelligence events on Run divisions now score 6 points per useful intel point (9 in Catarina Focus), capped by room left to 100 (was a flat 40/60 regardless of amount).
 - Execute promote score uses expected rank gain (1 + extra-rank chance, capped at R3) instead of a rounded rank jump.
 - Interrogate payoff for kicking an intruder out is scaled by (1 - keep-rank chance).
