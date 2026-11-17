@@ -27,6 +27,7 @@ All notable changes to BetrayalHelper are documented here. The format follows Ke
 - All UI-tree / screen-position fallbacks (card coordinates, `Position.Y > 1700` prisoner check, `SyndicateStates` wrapper, safehouse UI-element signal). Game memory is the only data source; if the board memory cannot be read, a red "MEMORY READ FAILED" window appears and recommendations are blocked.
 
 ### Fixed
+- Intel into a division that is not run (Filler) is no longer penalised (-8 per point): it is free, worth +1 per useful point, so +4 Research beats Release but not real options. One helper (`BuildIntelOutcome`) now scores intel for both Gain Intelligence and Bargain events; Bargain intel was a flat 40/60 before.
 - Relationships: the ExileCore `BetrayalMemberRelationships` map works (verified: Aisling-Elreon became Trusted and appeared symmetrically) but is sometimes empty. The plugin now keeps the last non-empty snapshot; the System tab shows OK (live), WARN (cached) or FAIL (never read).
 - Removed a fallback that read board state `+0x50` as "Neutral" relations; that vector is the leader-to-member link, not a relationship.
 - Safehouse Rewards: Filler divisions are never run (intel there counts as a cost, no run banner), whatever the saved Run tick says. Run can only switch a Farm division off; the Run checkbox is disabled for Filler divisions.

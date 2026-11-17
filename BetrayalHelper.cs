@@ -2225,22 +2225,8 @@ namespace BetrayalHelper
                                 // e.g. "Korell and Riker become Trusted. +4 Research Intelligence"
                                 {
                                     Match intelMatch = Regex.Match(_eventText, @"\+(\d+)\s+(\w+)\s+Intelligence");
-                                    if (intelMatch.Success)
-                                    {
-                                        string intelJob = intelMatch.Groups[2].Value;
-                                        if (_jobsToGainIntelligence.Contains(intelJob))
-                                        {
-                                            int intelScore = Settings.FarmingMode == FarmingMode.CatarinaFocus ? 60 : 40;
-                                            _eventOutcomes.Add(new Outcome(OutcomeType.GainInformationToInterestingJob, ActionType.Special, intelScore,
-                                                $"+{intelMatch.Groups[1].Value} {intelJob} Intelligence"));
-                                        }
-                                        else
-                                        {
-                                            int intelAmount = int.Parse(intelMatch.Groups[1].Value);
-                                            _eventOutcomes.Add(new Outcome(OutcomeType.GainInformationToBadJob, ActionType.Special, -intelAmount * 8,
-                                                $"Avoid +{intelAmount} {intelJob} Intelligence (Skip/Filler division)"));
-                                        }
-                                    }
+                                    if (intelMatch.Success && int.TryParse(intelMatch.Groups[1].Value, out int bargainIntel))
+                                        _eventOutcomes.Add(BuildIntelOutcome(intelMatch.Groups[2].Value, bargainIntel));
                                 }
 
 
@@ -2651,6 +2637,27 @@ namespace BetrayalHelper
 
             return eventOutcome;
         }
+        /// <summary>
+        /// Value of +gain intelligence for a division. Run divisions: 6 per useful point (9 in Catarina),
+        /// +25 when it reaches 100. Divisions that are not run (Filler): intel is free, worth 1 per useful
+        /// point - enough to beat Release, never enough to beat a real option. "Useful" is capped by the room left to 100.
+        /// </summary>
+        private Outcome BuildIntelOutcome(string job, int gain)
+        {
+            int current = ReadDivisionIntel().TryGetValue(job, out var cur) ? cur : 0;
+            int useful = Math.Clamp(Math.Min(gain, 100 - current), 0, 100);
+            bool wanted = _jobsToGainIntelligence != null && _jobsToGainIntelligence.Contains(job);
+            if (wanted)
+            {
+                int perPoint = Settings.FarmingMode == FarmingMode.CatarinaFocus ? 9 : 6;
+                int completionBonus = (current + gain >= 100 && current < 100) ? 25 : 0;
+                return new Outcome(OutcomeType.GainInformationToInterestingJob, ActionType.Special, useful * perPoint + completionBonus,
+                    $"+{gain} {job} intelligence ({current}/100, {useful} useful{(completionBonus > 0 ? ", completes safehouse" : "")})");
+            }
+            return new Outcome(OutcomeType.GainInformationToBadJob, ActionType.Special, useful,
+                $"+{gain} {job} intelligence ({current}/100): free, division is not run");
+        }
+
         private List<Outcome> IntelligenceAction()
         {
             List<Outcome> eventOutcome = new List<Outcome>();
@@ -2664,33 +2671,10 @@ namespace BetrayalHelper
                 if (Settings.DebugMode)
                     LogMessage("Event Job is   " + jobToCheck, 5, Color.Blue);
 
-                if (_jobsToGainIntelligence.Contains(jobToCheck))
-                {
-                    // Value scales with the amount actually useful (capped by the room left to 100).
-                    int gain = 1;
-                    var gainMatch = Regex.Match(_eventText, @"\+?(\d+)");
-                    if (gainMatch.Success) int.TryParse(gainMatch.Groups[1].Value, out gain);
-                    int current = ReadDivisionIntel().TryGetValue(jobToCheck, out var cur) ? cur : 0;
-                    int useful = Math.Clamp(Math.Min(gain, 100 - current), 0, 100);
-                    int perPoint = Settings.FarmingMode == FarmingMode.CatarinaFocus ? 9 : 6;
-                    // Completing the safehouse (reaching 100) is worth extra: it is the point of stacking intel.
-                    int completionBonus = (current + gain >= 100 && current < 100) ? 25 : 0;
-                    eventOutcome.Add(new Outcome(OutcomeType.GainInformationToInterestingJob, ActionType.Special, useful * perPoint + completionBonus,
-                        $" Gain +{gain} intelligence to {jobToCheck} ({current}/100, {useful} useful{(completionBonus > 0 ? ", completes safehouse" : "")})"));
-                }
-                else
-                {
-                    int amount = 1;
-                    var amountMatch = Regex.Match(_eventText, @"\+?(\d+)");
-                    if (amountMatch.Success)
-                        int.TryParse(amountMatch.Groups[1].Value, out amount);
-                    int score = -Math.Max(1, amount) * 8;
-                    eventOutcome.Add(new Outcome(OutcomeType.GainInformationToBadJob, ActionType.Special, score,
-                        $"Avoid +{amount} {jobToCheck} Intelligence (Skip/Filler division)"));
-
-                }
-
-
+                int gain = 1;
+                var gainMatch = Regex.Match(_eventText, @"\+?(\d+)");
+                if (gainMatch.Success) int.TryParse(gainMatch.Groups[1].Value, out gain);
+                eventOutcome.Add(BuildIntelOutcome(jobToCheck, gain));
             }
             return eventOutcome;
         }

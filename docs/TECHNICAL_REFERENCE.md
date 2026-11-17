@@ -70,7 +70,7 @@ Thresholds used everywhere: `>= 30` good Farm member, `>= 1` filler, `0` outside
 
 - `CatarinaFocus`: always run.
 - `SafehouseRewards`: only Farm divisions can run (Filler never); the Run tick can only switch a Farm division off.
-- Intel is wanted exactly in divisions where this is true (`_jobsToGainIntelligence`), otherwise it is a cost.
+- Run-wanted divisions (`_jobsToGainIntelligence`) get full intel value; others get a small positive value (intel is free, only the safehouse run is skipped).
 
 ### 2.3 Safehouse ready (`UpdateReadySafehouses`)
 
@@ -79,7 +79,7 @@ Division is ready when `ReadDivisionIntel()[division] >= 100` **and** `ShouldRun
 ### 2.4 Intelligence events (`IntelligenceAction`, text `+N <Division> Intelligence`)
 
 - Division is run-wanted: `useful = min(N, 100 - currentIntel)`; score `useful x 6` (`x 9` in CatarinaFocus), `+25` if the event reaches 100.
-- Division not run-wanted: `-8 x N`.
+- Division not run-wanted (Filler): intel is free, `+1` per useful point (beats Release, never beats a real option). Same formula for the `+N Division Intelligence` part of Bargain events (`BuildIntelOutcome`).
 
 ### 2.5 Execute (case `Execute`)
 
