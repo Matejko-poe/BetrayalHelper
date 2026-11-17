@@ -9,6 +9,11 @@ All notable changes to BetrayalHelper are documented here. The format follows Ke
 - `ShowPriorityOrder` setting; orange frame for Farm targets still outside the board.
 - `tools/intel_snap.py` (in BetrayalHelperv2/tools) to snapshot/diff board memory.
 
+### Changed (scoring)
+- Gain Intelligence events on Run divisions now score 6 points per useful intel point (9 in Catarina Focus), capped by room left to 100 (was a flat 40/60 regardless of amount).
+- Execute promote score uses expected rank gain (1 + extra-rank chance, capped at R3) instead of a rounded rank jump.
+- Interrogate payoff for kicking an intruder out is scaled by (1 - keep-rank chance).
+
 ### Fixed
 - Board Overview layout: divisions in one row, Outside and Farm Targets below; leader shown by row highlight; all UI text in English.
 - Raw action label (e.g. NPCBEFRIENDSANOTHER) over the recommended button is now debug-only.

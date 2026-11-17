@@ -2154,7 +2154,8 @@ namespace BetrayalHelper
                         {
                             // Misplaced member or intruder in Farm division!
                             // Interrogating is CRITICAL to demote them to Rank 0 / Outside so our farm targets can enter!
-                            int intruderInterrogateScore = 150;
+                            // Rank loss is what kicks the intruder out, so Unconditional Release lowers the payoff.
+                            int intruderInterrogateScore = (int)Math.Round(150 * (1.0 - KeepRankChance));
                             _eventOutcomes.Add(new Outcome(
                                 OutcomeType.RemoveBadMemberFromBadJob,
                                 ActionType.Interrogate,
@@ -2359,12 +2360,13 @@ namespace BetrayalHelper
                                  if (_eventMaster.Score >= 30)
                                 {
                                     int resultingRank = GetRankAfterExecute(_eventMaster.Rank);
-                                    int gainedRanks = Math.Max(0, resultingRank - _eventMaster.Rank);
+                                    // Expected rank gain: +1, plus the extra-rank chance, capped at rank 3.
+                                    double expectedGain = Math.Min(3 - Math.Clamp(_eventMaster.Rank, 0, 3), 1.0 + ExtraRankChance);
                                     int promoteScore;
                                     if (executeNoEffect)
                                         promoteScore = 5;
                                     else
-                                        promoteScore = 80 * gainedRanks;
+                                        promoteScore = (int)Math.Round(80 * expectedGain);
                                     _eventOutcomes.Add(new Outcome(OutcomeType.PromoteGoodMemberInInterestingJob, ActionType.Special, promoteScore,
                                         $"{_eventMaster.Name} R{_eventMaster.Rank} -> R{resultingRank}{(executeNoEffect ? " (NO EFFECT)" : "")}"));
                                     AddExecuteIntelligenceOutcome(_eventOutcomes, _eventMaster.Job, resultingRank);
@@ -2856,9 +2858,15 @@ namespace BetrayalHelper
 
                 if (_jobsToGainIntelligence.Contains(jobToCheck))
                 {
-                    // In Catarina mode: intel to ANY division is highly valuable (more safehouses = more medallions)
-                    int intelScore = Settings.FarmingMode == FarmingMode.CatarinaFocus ? 60 : 40;
-                    eventOutcome.Add(new Outcome(OutcomeType.GainInformationToInterestingJob, ActionType.Special, intelScore, $" Gain intelligence to {jobToCheck} "));
+                    // Value scales with the amount actually useful (capped by the room left to 100).
+                    int gain = 1;
+                    var gainMatch = Regex.Match(_eventText, @"\+?(\d+)");
+                    if (gainMatch.Success) int.TryParse(gainMatch.Groups[1].Value, out gain);
+                    int current = ReadDivisionIntel().TryGetValue(jobToCheck, out var cur) ? cur : 0;
+                    int useful = Math.Clamp(Math.Min(gain, 100 - current), 0, 100);
+                    int perPoint = Settings.FarmingMode == FarmingMode.CatarinaFocus ? 9 : 6;
+                    eventOutcome.Add(new Outcome(OutcomeType.GainInformationToInterestingJob, ActionType.Special, useful * perPoint,
+                        $" Gain +{gain} intelligence to {jobToCheck} ({current}/100, {useful} useful)"));
                 }
                 else
                 {

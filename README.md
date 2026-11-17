@@ -209,7 +209,7 @@ dotnet build .\BetrayalHelper.csproj --no-restore
 - Relationship types are read directly from `ServerData.BetrayalMemberRelationships`; no screen-colour detection is required.
 - Atlas nodes are toggled manually; the plugin does not read the Atlas tree.
 - Member names: the engine uses `ItThatFled`; the plugin normalizes it to `It That Fled`.
-- Intelligence value is not yet capped precisely by the remaining amount to 100 in every outcome parser.
+- Intelligence is capped by the remaining amount to 100 for Gain Intelligence events; other parsers (Steal Intelligence, Execute) still use fixed weights.
 - No automated test suite currently simulates every localized encounter string.
 
 ## Documentation
