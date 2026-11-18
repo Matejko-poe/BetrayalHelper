@@ -4,6 +4,7 @@ Purpose: for every piece of data the plugin uses, say **where it comes from, how
 
 Rules that apply to everything below:
 
+- **Source order: HUD first, own memory as automatic fallback.** The board (names, divisions, ranks, leaders) and leader intel are read from the HUD wrapper (`SyndicateStates`, `SyndicateLeadersData`) when it returns valid data (`ValidateBoard`: known names, valid divisions, rank 0-3, first 4 entries = 4 distinct divisions; intel 0-100). If the HUD data is empty or invalid, the plugin uses its own verified memory offsets (M-*). If both fail, a red window appears and recommendations stop. The System tab row "Board source" shows which one is in use and why. Prisoners (M-PRISON) have no HUD equivalent and always come from memory.
 - **Memory only.** Data comes from game memory (read-only `GameController.Memory.Read<T>`) or from ExileCore wrappers that read memory. No card positions, no screen coordinates, no UI-tree layout guessing. UI rectangles are used only to *draw* highlights.
 - If a read fails, the plugin must say so (System tab, red `MEMORY READ FAILED` window) and stop recommending. It must not guess.
 - Names: the engine writes `ItThatFled`; everything inside the plugin uses `It That Fled` (`NormalizeName`).

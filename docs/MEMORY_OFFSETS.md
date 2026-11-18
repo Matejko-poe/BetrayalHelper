@@ -26,7 +26,7 @@ Verified live on 2026-11-17 with the WhatsAnAiBridge (`tools/intel_snap.py` befo
 
 ExileCore.dll/GameOffsets.dll updated 2026-11-18 08:28. Checked live with the board open: `ServerData.BetrayalMemberRelationships` now returns 14 members (works, used by the plugin); `SyndicatePanel.SyndicateStates` still `Count = 0` and `SyndicateLeadersData.Leaders` has 4 entries with empty job/target, so the board itself is still read from the plugin's own offsets. The System tab row "HUD wrapper (SyndicateStates)" compares the wrapper with plugin memory (N/A while it returns 0 states, OK when all entries agree). GameOffsets.dll only exposes server-data offsets (`ActiveBetrayalMembers`, `BetrayalMemberRelationships`); board offsets are hardcoded inside ExileCore.dll, so HUD fixes arrive as working wrappers, not as constants we can read.
 
-Plan once the wrapper agrees: use it as primary source after the same sanity checks (known names, 4 distinct leader divisions, ranks 0-3, intel 0-100) and keep the plugin offsets as automatic fallback.
+Implemented: the plugin now reads the HUD wrapper first and falls back to its own offsets automatically, per read, after the same sanity checks (known names, 4 distinct leader divisions, ranks 0-3, intel 0-100). While `SyndicateStates` stays at 0 the plugin runs on memory.
 
 ## Relationships
 

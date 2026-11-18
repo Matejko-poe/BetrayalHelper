@@ -26,6 +26,9 @@ namespace BetrayalHelper
         List<BetrayalMaster> ListBetrayalMasters = new List<BetrayalMaster>();
         bool badJobsAreFull = false;
         bool _memoryReadOk = true;
+        string _boardSource = "none";
+        string _hudFailure = "";
+        string _memFailure = "";
         HistoryLogger? _history;
         long _lastBoardLogTick;
         Dictionary<string, Dictionary<string, string>>? _lastRelationships;
@@ -204,6 +207,17 @@ namespace BetrayalHelper
                 return rows;
             }
             rows.Add(new SystemCheck("Syndicate panel", "OK", $"address 0x{panel.Address:X}, board {(panel.IsVisible ? "open" : "closed")}"));
+            try
+            {
+                var hudRead = ReadBoardFromHud(panel);
+                string hudBad = hudRead.Failure.Length > 0 ? hudRead.Failure : ValidateBoard(hudRead);
+                var memRead = ReadBoardFromMemory(panel);
+                string memBad = memRead.Failure.Length > 0 ? memRead.Failure : ValidateBoard(memRead);
+                string use = hudBad.Length == 0 ? "HUD" : memBad.Length == 0 ? "memory" : "none";
+                rows.Add(new SystemCheck("Board source (HUD first, memory fallback)", use == "none" ? "FAIL" : "OK",
+                    $"using {use}. HUD: {(hudBad.Length == 0 ? $"valid, {hudRead.Members.Count} members" : hudBad)}. Memory: {(memBad.Length == 0 ? $"valid, {memRead.Members.Count} members" : memBad)}"));
+            }
+            catch (Exception ex) { rows.Add(new SystemCheck("Board source (HUD first, memory fallback)", "FAIL", ex.Message)); }
 
             long start = 0, end = 0;
             try { start = mem.Read<long>(panel.Address + 0x3F8); end = mem.Read<long>(panel.Address + 0x400); } catch { }
@@ -989,6 +1003,28 @@ namespace BetrayalHelper
         private Dictionary<string, int> ReadDivisionIntel()
         {
             var result = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+            // HUD first: SyndicateLeadersData must list 4 leaders with a division and intel 0-100.
+            try
+            {
+                var leaders = GameController?.Game?.IngameState?.IngameUi?.SyndicatePanel?.SyndicateLeadersData?.Leaders;
+                if (leaders != null && leaders.Count == 4)
+                {
+                    var fromHud = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+                    bool ok = true;
+                    foreach (var l in leaders)
+                    {
+                        string hj = l?.Job?.Name ?? "";
+                        int hi = l?.Intel ?? -1;
+                        if (hj.Length == 0 || hj == "None" || hi < 0 || hi > 100) { ok = false; break; }
+                        fromHud[hj] = hi;
+                    }
+                    if (ok && fromHud.Count == 4) return fromHud;
+                }
+            }
+            catch { }
+
+            // Fallback: plugin memory (leader state +0x84).
             try
             {
                 var mem = GameController?.Memory;
@@ -1716,68 +1752,66 @@ namespace BetrayalHelper
             }
 
             var newMasters = new List<BetrayalMaster>();
-            var mem = GameController.Memory;
 
-            // Direct Memory Reader for Immortal Syndicate States (offset 0x3F8 / 0x400 in SyndicatePanel)
-            try
+            // Source order: HUD (ExileCore wrapper) first, the plugin's own memory offsets as automatic fallback.
+            // A source is used only if it passes ValidateBoard; otherwise the next one is tried.
+            // Never UI positions or layout.
+            BoardRead? chosen = null;
+            var hudRead = ReadBoardFromHud(syndicatePanel);
+            _hudFailure = hudRead.Failure.Length > 0 ? hudRead.Failure : ValidateBoard(hudRead);
+            if (_hudFailure.Length == 0)
             {
-                long panelAddr = syndicatePanel.Address;
-                if (panelAddr != 0 && mem != null)
+                chosen = hudRead;
+                _memFailure = "";
+            }
+            else
+            {
+                var memRead = ReadBoardFromMemory(syndicatePanel);
+                _memFailure = memRead.Failure.Length > 0 ? memRead.Failure : ValidateBoard(memRead);
+                if (_memFailure.Length == 0) chosen = memRead;
+            }
+            string source = chosen?.Source ?? "none";
+            if (source != _boardSource)
+            {
+                LogMessage($"Board source: {source} (HUD: {(_hudFailure.Length == 0 ? "valid" : _hudFailure)}; memory: {(_memFailure.Length == 0 ? "valid/not needed" : _memFailure)})", 5, Color.Green);
+                _history?.Count("source." + source);
+                _boardSource = source;
+            }
+
+            if (chosen != null)
+            {
+                foreach (var raw in chosen.Members)
                 {
-                    long statesStart = mem.Read<long>(panelAddr + 0x3F8);
-                    long statesEnd = mem.Read<long>(panelAddr + 0x400);
-                    if (statesEnd > statesStart && (statesEnd - statesStart) % 160 == 0)
+                    string name = raw.Name;
+                    string job = raw.Job;
+                    int rank = raw.Rank;
+                    int i = raw.Index;
+                    bool isLeader = i < 4;
+
+                    if (string.IsNullOrEmpty(name) || !allMasters.Contains(name))
+                        continue;
+
+                    var typedRelationships = liveRelationships.TryGetValue(name, out var savedRelationships)
+                        ? new Dictionary<string, string>(savedRelationships, StringComparer.OrdinalIgnoreCase)
+                        : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+                    List<string> stateNames = typedRelationships.Keys.ToList();
+                    int score = GetScore(name, job, rank);
+                    var betrayalMaster = new BetrayalMaster(name, job, rank, isLeader, stateNames, score)
                     {
-                        int stateCount = (int)((statesEnd - statesStart) / 160);
-                        for (int i = 0; i < stateCount; i++)
-                        {
-                            long stateAddr = statesStart + i * 160;
-                            long targetPtr = mem.Read<long>(stateAddr + 0x08);
-                            long jobPtr = mem.Read<long>(stateAddr + 0x18);
-                            long rankPtr = mem.Read<long>(stateAddr + 0x28);
+                        SlotIndex = i
+                    };
+                    betrayalMaster.RelationshipStatuses = typedRelationships;
+                    UpdateMasterGoalStatus(betrayalMaster);
 
-                            long namePtr = targetPtr != 0 ? mem.Read<long>(targetPtr) : 0;
-                            string name = namePtr != 0 ? mem.ReadStringU(namePtr) : "";
-                            if (name.Equals("ItThatFled", StringComparison.OrdinalIgnoreCase))
-                                name = "It That Fled";
+                    if (Settings.MegaDebugMode)
+                        LogMessage(betrayalMaster.ToString(), 5, Color.Red);
 
-                            long jobNamePtr = jobPtr != 0 ? mem.Read<long>(jobPtr + 0x08) : 0;
-                            string job = jobNamePtr != 0 ? mem.ReadStringU(jobNamePtr) : "None";
-
-                            int rank = rankPtr != 0 ? DecodeRank(mem.Read<int>(rankPtr + 0x10)) : 0;
-                            bool isLeader = i < 4;
-
-                            if (string.IsNullOrEmpty(name) || !allMasters.Contains(name))
-                                continue;
-
-                            var typedRelationships = liveRelationships.TryGetValue(name, out var savedRelationships)
-                                ? new Dictionary<string, string>(savedRelationships, StringComparer.OrdinalIgnoreCase)
-                                : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-
-                            List<string> stateNames = typedRelationships.Keys.ToList();
-                            int score = GetScore(name, job, rank);
-                            var betrayalMaster = new BetrayalMaster(name, job, rank, isLeader, stateNames, score)
-                            {
-                                SlotIndex = i
-                            };
-                            betrayalMaster.RelationshipStatuses = typedRelationships;
-                            UpdateMasterGoalStatus(betrayalMaster);
-
-                            if (Settings.MegaDebugMode)
-                                LogMessage(betrayalMaster.ToString(), 5, Color.Red);
-
-                            newMasters.Add(betrayalMaster);
-                        }
-                    }
+                    newMasters.Add(betrayalMaster);
                 }
             }
-            catch (Exception ex)
-            {
-                if (Settings.DebugMode)
-                    LogMessage($"Memory syndicate parse error: {ex.Message}", 5, Color.Red);
-            }
 
-            // Memory is the only data source. No screen-position / UI-tree fallbacks.
+            // Data comes only from the HUD wrapper or from game memory. No screen-position / UI-tree fallbacks.
             _memoryReadOk = newMasters.Count > 0;
             if (!_memoryReadOk)
             {
@@ -1800,6 +1834,100 @@ namespace BetrayalHelper
                 UpdateReadySafehouses();
                 RecordBoardHistory();
             }
+        }
+
+        private sealed class RawMember
+        {
+            public string Name = "";
+            public string Job = "None";
+            public int Rank;
+            public int Index;
+        }
+
+        private sealed class BoardRead
+        {
+            public string Source = "";
+            public string Failure = "";
+            public List<RawMember> Members = new();
+        }
+
+        private static readonly HashSet<string> ValidJobNames = new(StringComparer.Ordinal) { "Transportation", "Fortification", "Research", "Intervention", "None" };
+
+        /// <summary>Board from the HUD (ExileCore) wrapper. Empty (Failure set) while the HUD cannot read it.</summary>
+        private BoardRead ReadBoardFromHud(SyndicatePanel panel)
+        {
+            var r = new BoardRead { Source = "HUD" };
+            try
+            {
+                var ws = panel.SyndicateStates;
+                if (ws == null || ws.Count == 0)
+                {
+                    r.Failure = "HUD returned 0 states";
+                    return r;
+                }
+                for (int i = 0; i < ws.Count; i++)
+                {
+                    var w = ws[i];
+                    string job = w.Job?.Name;
+                    r.Members.Add(new RawMember
+                    {
+                        Name = NormalizeName(w.Target?.Name ?? ""),
+                        Job = string.IsNullOrEmpty(job) ? "None" : job,
+                        Rank = w.Rank.RankInt,
+                        Index = i
+                    });
+                }
+            }
+            catch (Exception ex) { r.Failure = "HUD read failed: " + ex.Message; }
+            return r;
+        }
+
+        /// <summary>Board from the plugin's own verified memory offsets (see docs/TECHNICAL_REFERENCE.md M-*).</summary>
+        private BoardRead ReadBoardFromMemory(SyndicatePanel panel)
+        {
+            var r = new BoardRead { Source = "memory" };
+            try
+            {
+                var mem = GameController?.Memory;
+                if (mem == null || panel == null || panel.Address == 0) { r.Failure = "memory interface or panel unavailable"; return r; }
+                long start = mem.Read<long>(panel.Address + 0x3F8);
+                long end = mem.Read<long>(panel.Address + 0x400);
+                if (start == 0 || end <= start || (end - start) % 160 != 0 || (end - start) / 160 > 40)
+                {
+                    r.Failure = $"state vector invalid (start=0x{start:X}, end=0x{end:X})";
+                    return r;
+                }
+                int count = (int)((end - start) / 160);
+                for (int i = 0; i < count; i++)
+                {
+                    long st = start + i * 160;
+                    long targetPtr = mem.Read<long>(st + 0x08);
+                    long jobPtr = mem.Read<long>(st + 0x18);
+                    long rankPtr = mem.Read<long>(st + 0x28);
+                    long namePtr = targetPtr != 0 ? mem.Read<long>(targetPtr) : 0;
+                    string name = NormalizeName(namePtr != 0 ? mem.ReadStringU(namePtr) : "");
+                    long jobNamePtr = jobPtr != 0 ? mem.Read<long>(jobPtr + 0x08) : 0;
+                    string job = jobNamePtr != 0 ? mem.ReadStringU(jobNamePtr) : "None";
+                    int rank = rankPtr != 0 ? DecodeRank(mem.Read<int>(rankPtr + 0x10)) : 0;
+                    r.Members.Add(new RawMember { Name = name, Job = job, Rank = rank, Index = i });
+                }
+            }
+            catch (Exception ex) { r.Failure = "memory read failed: " + ex.Message; }
+            return r;
+        }
+
+        /// <summary>Sanity check applied to every source. Returns "" when the data is plausible, else the reason.</summary>
+        private string ValidateBoard(BoardRead r)
+        {
+            if (r.Members.Count < 4) return $"only {r.Members.Count} members";
+            var unknown = r.Members.Where(m => !allMasters.Contains(m.Name)).Select(m => string.IsNullOrEmpty(m.Name) ? "<empty>" : m.Name).Take(3).ToList();
+            if (unknown.Count > 0) return "unknown names: " + string.Join(", ", unknown);
+            var badJobs = r.Members.Where(m => !ValidJobNames.Contains(m.Job)).Select(m => m.Job).Distinct().Take(3).ToList();
+            if (badJobs.Count > 0) return "unknown divisions: " + string.Join(", ", badJobs);
+            if (r.Members.Any(m => m.Rank < 0 || m.Rank > 3)) return "rank out of range 0-3";
+            int leaderDivisions = r.Members.OrderBy(m => m.Index).Take(4).Select(m => m.Job).Where(j => j != "None").Distinct().Count();
+            if (leaderDivisions != 4) return "first 4 entries are not 4 distinct divisions";
+            return "";
         }
 
         private void RecordBoardHistory()
@@ -1892,7 +2020,7 @@ namespace BetrayalHelper
                 if (ImGui.Begin("BetrayalHelper - MEMORY READ FAILED###BetrayalMemoryFail"))
                 {
                     ImGui.TextColored(new System.Numerics.Vector4(1f, 0.3f, 0.3f, 1f), "Syndicate board memory could not be read.");
-                    ImGui.TextWrapped("BetrayalHelper only works from game memory (SyndicatePanel + 0x3F8 state vector). A game patch probably moved the offset. Recommendations are disabled.");
+                    ImGui.TextWrapped("Neither the HUD wrapper nor the plugin memory offsets (SyndicatePanel + 0x3F8 state vector) returned a valid board. A game patch probably moved the offset. Recommendations are disabled.");
                 }
                 ImGui.End();
                 return;
