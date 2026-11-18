@@ -6,6 +6,9 @@ All notable changes to BetrayalHelper are documented here. The format follows Ke
 
 ## [1.5.0] - 2026-11-18
 
+### Changed (safehouse readiness)
+- A safehouse is "ready" when the leader's intel is 100, the division is set to Run, **and** the division leader plus every listed member are in the division at rank 3 (Catarina Focus: intel only). The Board Overview banner and the Safehouse Ready window now use the same rule (`EvaluateSafehouse`); when intel is 100 but someone is below rank 3 or misplaced, the overview shows an orange WAIT/FIX line instead of "RUN NOW".
+
 ### Changed (data sources)
 - Board and leader intel are read from the HUD wrapper first and from the plugin memory offsets as automatic fallback (each source must pass sanity checks: known names, valid divisions, rank 0-3, 4 distinct leader divisions, intel 0-100). System tab row "Board source" shows the source in use and the reason; the log prints a line when the source changes; `stats.json` counts `source.HUD` / `source.memory`. Prisoners remain memory-only.
 

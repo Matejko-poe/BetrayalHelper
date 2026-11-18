@@ -73,9 +73,9 @@ Thresholds used everywhere: `>= 30` good Farm member, `>= 1` filler, `0` outside
 - `SafehouseRewards` (3.30 plan, run everything): the per-division Run setting is authoritative, default all four on; a missing entry means run. Disable Run on a division to block it.
 - Run-wanted divisions (`_jobsToGainIntelligence`, default all four) get full intel value; a division with Run off gets a small positive value (intel is free, only the run is skipped). Defaults and rationale: docs/STRATEGY_3.30.md.
 
-### 2.3 Safehouse ready (`UpdateReadySafehouses`)
+### 2.3 Safehouse ready (`UpdateReadySafehouses`, `EvaluateSafehouse`)
 
-Division is ready when `ReadDivisionIntel()[division] >= 100` **and** `ShouldRunDivision(division)`. Source: M-INTEL. Nothing else (no rank or UI signals) can trigger it.
+Division is ready when `ReadDivisionIntel()[division] >= 100` (M-INTEL), `ShouldRunDivision(division)` **and** `EvaluateSafehouse(division).Status == "GO"`: SafehouseRewards requires the division leader (M-LEADER) and every listed member to be in the division at rank 3 (M-RANK); CatarinaFocus requires intel only. Status `WAIT` = someone below rank 3, `FIX` = someone missing or in the wrong division. The overview banner and the Safehouse Ready window use this same function; at intel 100 with WAIT/FIX the overview shows an orange line instead of the RUN banner.
 
 ### 2.4 Intelligence events (`IntelligenceAction`, text `+N <Division> Intelligence`)
 

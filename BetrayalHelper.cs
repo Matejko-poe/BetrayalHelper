@@ -36,6 +36,7 @@ namespace BetrayalHelper
         bool hasClosedWindow = false;
         bool _closedOverviewForCurrentPanel = false;
         private readonly HashSet<string> _readySafehouses = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, string> _waitingSafehouses = new(StringComparer.OrdinalIgnoreCase);
 
 
         List<string> allMasters = new List<string>
@@ -970,12 +971,55 @@ namespace BetrayalHelper
             return Settings.DivisionRoles.TryGetValue(division, out var role) && role == "Farm";
         }
 
+        /// <summary>
+        /// Can this division's safehouse be run now (apart from intel)? SafehouseRewards: the division leader and every
+        /// configured member must be in the division at rank 3. CatarinaFocus: ranks are not required (medallions).
+        /// Status: "GO", "WAIT" (someone below rank 3) or "FIX" (someone missing / in the wrong division).
+        /// </summary>
+        private (string Status, List<string> Ready, List<string> NotReady, List<string> Wrong) EvaluateSafehouse(string division)
+        {
+            var ready = new List<string>();
+            var notReady = new List<string>();
+            var wrong = new List<string>();
+            bool needRanks = Settings.FarmingMode != FarmingMode.CatarinaFocus;
+
+            var leader = ListBetrayalMasters.FirstOrDefault(m => m.Job == division && m.IsLeader);
+            if (needRanks)
+            {
+                if (leader == null) wrong.Add("leader not found");
+                else if (leader.Rank >= 3) ready.Add($"{leader.Name} (leader) - Rank {leader.Rank}");
+                else notReady.Add($"{leader.Name} (leader) - Rank {leader.Rank} / 3");
+            }
+
+            var listed = GetRequiredMemberDivisions().Where(kv => kv.Key == division).SelectMany(kv => kv.Value).Distinct();
+            foreach (var member in listed)
+            {
+                if (leader != null && leader.Name.Equals(member, StringComparison.OrdinalIgnoreCase))
+                    continue; // already counted as the leader
+                var m = ListBetrayalMasters.FirstOrDefault(x => x.Name.Equals(member, StringComparison.OrdinalIgnoreCase));
+                if (m == null) wrong.Add($"{member} (not on board)");
+                else if (m.Job != division) wrong.Add($"{member} (currently in {(m.Job == "None" ? "Outside" : m.Job)})");
+                else if (!needRanks || m.Rank >= 3) ready.Add($"{member} - Rank {m.Rank}");
+                else notReady.Add($"{member} - Rank {m.Rank} / 3");
+            }
+
+            string status = wrong.Count > 0 ? "FIX" : notReady.Count > 0 ? "WAIT" : "GO";
+            return (status, ready, notReady, wrong);
+        }
+
         private void UpdateReadySafehouses()
         {
             _readySafehouses.Clear();
+            _waitingSafehouses.Clear();
             foreach (var kv in ReadDivisionIntel())
-                if (kv.Value >= 100 && ShouldRunDivision(kv.Key))
-                    _readySafehouses.Add(kv.Key);
+            {
+                if (kv.Value < 100 || !ShouldRunDivision(kv.Key)) continue;
+                var ev = EvaluateSafehouse(kv.Key);
+                if (ev.Status == "GO") _readySafehouses.Add(kv.Key);
+                else _waitingSafehouses[kv.Key] = ev.Status == "WAIT"
+                    ? "WAIT - need rank 3: " + string.Join(", ", ev.NotReady)
+                    : "FIX placement: " + string.Join(", ", ev.Wrong);
+            }
         }
 
         private bool ShouldPreserveMemberPlacement(string division)
@@ -1070,50 +1114,22 @@ namespace BetrayalHelper
                         farmMemberInfo[m.Name] = (m.Job, m.Rank);
                 }
 
-                // Build safehouse advice per division
+                // Build safehouse advice per division (same readiness rule as the Board Overview banner)
                 var safeAdvice = new List<(string text, System.Numerics.Vector4 color)>();
                 foreach (var warningJob in warnings)
                 {
-                    bool shouldRun = ShouldRunDivision(warningJob);
-
-                    if (farmJobs.TryGetValue(warningJob, out var targetMembers))
+                    if (!ShouldRunDivision(warningJob))
                     {
-                        var notReady = new List<string>();
-                        var ready = new List<string>();
-                        var wrongPlace = new List<string>();
-                        foreach (var member in targetMembers)
-                        {
-                            if (farmMemberInfo.TryGetValue(member, out var info))
-                            {
-                                if (info.job != warningJob)
-                                    wrongPlace.Add($"{member} (currently in {info.job})");
-                                else if (info.rank >= 3)
-                                    ready.Add($"{member} - Rank {info.rank}");
-                                else
-                                    notReady.Add($"{member} - Rank {info.rank} / 3");
-                            }
-                            else
-                            {
-                                wrongPlace.Add($"{member} (not on board)");
-                            }
-                        }
-
-                        if (wrongPlace.Count == 0 && notReady.Count == 0)
-                            safeAdvice.Add(($"[{warningJob}] >>> GO NOW! {string.Join(", ", ready)} <<<", new System.Numerics.Vector4(0f, 1f, 0f, 1f)));
-                        else if (notReady.Count > 0)
-                            safeAdvice.Add(($"[{warningJob}] WAIT - need rank 3: {string.Join(", ", notReady)}", new System.Numerics.Vector4(1f, 0.5f, 0f, 1f)));
-                        else
-                            safeAdvice.Add(($"[{warningJob}] FIX placement: {string.Join(", ", wrongPlace)}", new System.Numerics.Vector4(1f, 1f, 0f, 1f)));
+                        safeAdvice.Add(($"[{warningJob}] Run is off for this division - not running it", new System.Numerics.Vector4(0.6f, 0.6f, 0.6f, 1f)));
+                        continue;
                     }
-                    else if (shouldRun)
-                    {
-                        // Filler division at 100% — opportunistic run (not primary farm target)
-                        safeAdvice.Add(($"[{warningJob}] >>> RUN (opportunistic, filler at 100%) <<<", new System.Numerics.Vector4(0.8f, 0.8f, 0.2f, 1f)));
-                    }
+                    var ev = EvaluateSafehouse(warningJob);
+                    if (ev.Status == "GO")
+                        safeAdvice.Add(($"[{warningJob}] >>> GO NOW! {string.Join(", ", ev.Ready)} <<<", new System.Numerics.Vector4(0f, 1f, 0f, 1f)));
+                    else if (ev.Status == "WAIT")
+                        safeAdvice.Add(($"[{warningJob}] WAIT - need rank 3: {string.Join(", ", ev.NotReady)}", new System.Numerics.Vector4(1f, 0.5f, 0f, 1f)));
                     else
-                    {
-                        safeAdvice.Add(($"[{warningJob}] Skip (Filler division, not running)", new System.Numerics.Vector4(0.6f, 0.6f, 0.6f, 1f)));
-                    }
+                        safeAdvice.Add(($"[{warningJob}] FIX placement: {string.Join(", ", ev.Wrong)}", new System.Numerics.Vector4(1f, 1f, 0f, 1f)));
                 }
 
                 // Show window when at least one division we should run is ready
@@ -1428,6 +1444,10 @@ namespace BetrayalHelper
                     ImGui.Spacing();
                 }
             }
+
+            // Intel is 100 but the leader / listed members are not ready: same rule as the safehouse window.
+            foreach (var waiting in _waitingSafehouses)
+                ImGui.TextColored(new System.Numerics.Vector4(1f, 0.6f, 0.1f, 1f), $"{waiting.Key.ToUpper()} intel 100 - {waiting.Value}");
 
             // Main table with 6 dedicated columns: 4 divisions + Outside + Targets
             if (ImGui.BeginTable("MasterTables", 4, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.Resizable))
