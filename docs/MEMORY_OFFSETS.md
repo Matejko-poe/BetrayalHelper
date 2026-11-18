@@ -22,6 +22,12 @@ Verified live on 2026-11-17 with the WhatsAnAiBridge (`tools/intel_snap.py` befo
 | `+0x78` | - | NOT intelligence (old assumption); do not use | rejected |
 | `+0x7C`, `+0x80` | float | UI position of the card; must not be used for logic | unused |
 
+## HUD update 2026-11-18 ("fixed betrayal data")
+
+ExileCore.dll/GameOffsets.dll updated 2026-11-18 08:28. Checked live with the board open: `ServerData.BetrayalMemberRelationships` now returns 14 members (works, used by the plugin); `SyndicatePanel.SyndicateStates` still `Count = 0` and `SyndicateLeadersData.Leaders` has 4 entries with empty job/target, so the board itself is still read from the plugin's own offsets. The System tab row "HUD wrapper (SyndicateStates)" compares the wrapper with plugin memory (N/A while it returns 0 states, OK when all entries agree). GameOffsets.dll only exposes server-data offsets (`ActiveBetrayalMembers`, `BetrayalMemberRelationships`); board offsets are hardcoded inside ExileCore.dll, so HUD fixes arrive as working wrappers, not as constants we can read.
+
+Plan once the wrapper agrees: use it as primary source after the same sanity checks (known names, 4 distinct leader divisions, ranks 0-3, intel 0-100) and keep the plugin offsets as automatic fallback.
+
 ## Relationships
 
 `IngameState.ServerData.BetrayalMemberRelationships` (ExileCore wrapper) returns typed Rival/Trusted per member and is verified live (Aisling-Elreon: none -> Trusted, symmetric). It is sometimes empty (observed 0, later 12 members), so the plugin caches the last non-empty snapshot. State vectors `+0x38` and `+0x50` are NOT relationships (`+0x50` = leader-to-member link, the yellow lines on the board). Raw offset of the map was not needed.

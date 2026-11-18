@@ -247,6 +247,38 @@ namespace BetrayalHelper
             rows.Add(new SystemCheck("Leaders (first 4 entries)", leadersOk ? "OK" : "FAIL",
                 leadersOk ? string.Join(", ", Enumerable.Range(0, 4).Select(i => $"{jobs[i]}: {names[i]}")) : "first 4 entries are not 4 distinct divisions"));
 
+            // Cross-check against the HUD (ExileCore) wrapper. It returned 0 states in 3.30 even after the 2026-11-18
+            // HUD update; when it recovers this row turns OK and the plugin can switch to it as primary source.
+            try
+            {
+                var ws = panel.SyndicateStates;
+                int wc = ws?.Count ?? 0;
+                if (wc == 0)
+                    rows.Add(new SystemCheck("HUD wrapper (SyndicateStates)", "N/A", "HUD returns 0 states; plugin uses its own memory offsets. Re-check after HUD updates."));
+                else
+                {
+                    int match = 0; var diffs = new List<string>();
+                    for (int i = 0; i < Math.Min(wc, n); i++)
+                    {
+                        try
+                        {
+                            var w = ws[i];
+                            string wn = NormalizeName(w.Target?.Name ?? "");
+                            string wj = w.Job?.Name ?? "None";
+                            int wr = w.Rank.RankInt;
+                            if (wn == names[i] && wj == jobs[i] && wr == ranks[i]) match++;
+                            else diffs.Add($"{names[i]}: HUD {wn}/{wj}/R{wr} vs memory {jobs[i]}/R{ranks[i]}");
+                        }
+                        catch { diffs.Add($"{names[i]}: HUD entry unreadable"); }
+                    }
+                    bool agree = wc == n && diffs.Count == 0;
+                    rows.Add(new SystemCheck("HUD wrapper (SyndicateStates)", agree ? "OK" : "WARN",
+                        agree ? $"{wc}/{n} entries agree with plugin memory (HUD wrapper usable as primary source)"
+                              : $"{match}/{n} agree; {string.Join("; ", diffs.Take(4))}"));
+                }
+            }
+            catch (Exception ex) { rows.Add(new SystemCheck("HUD wrapper (SyndicateStates)", "WARN", "read failed: " + ex.Message)); }
+
             var badRanks = Enumerable.Range(0, n).Where(i => ranks[i] < 0 || ranks[i] > 3).Select(i => $"{names[i]}={ranks[i]}").ToList();
             rows.Add(new SystemCheck("Ranks", badRanks.Count == 0 ? "OK" : "FAIL",
                 badRanks.Count == 0 ? "all within 0-3" : $"out of range: {string.Join(", ", badRanks)}"));
