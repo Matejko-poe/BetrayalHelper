@@ -4,6 +4,8 @@ All notable changes to BetrayalHelper are documented here. The format follows Ke
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-11-18
+
 ### Added
 - **History and statistics** (`HistoryLogger.cs`, toggle `RecordHistory`): `history/board.jsonl` (every board change with the event it followed), `decisions.jsonl` (every recommendation with all outcome groups), `plan.jsonl` (plan-vs-reality snapshots), `stats.json` (counters). Shown as a row in the System tab. See docs/TECHNICAL_REFERENCE.md 2.10.
 - `docs/TECHNICAL_REFERENCE.md`: data catalog (ID -> source -> code -> System row -> status), all scoring formulas, failure -> repair table, tools and code map.
