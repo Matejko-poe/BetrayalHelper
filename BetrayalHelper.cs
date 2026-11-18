@@ -347,6 +347,26 @@ namespace BetrayalHelper
             }
         }
 
+        /// <summary>
+        /// Recommended 3.30 setup (run everything, currency from rewards). Sources: r/pathofexile 3.30 Betrayal
+        /// cheatsheet thread (patch-note rewards, member picks of the cheatsheet author and commenters), see docs/STRATEGY_3.30.md.
+        /// Every division is a placement target with two members; all four are run.
+        /// </summary>
+        private void ApplyRecommendedSetup()
+        {
+            Settings.FarmingMode = FarmingMode.SafehouseRewards;
+            Settings.DivisionRoles["Transportation"] = "Farm";
+            Settings.DivisionRoles["Fortification"] = "Farm";
+            Settings.DivisionRoles["Research"] = "Farm";
+            Settings.DivisionRoles["Intervention"] = "Farm";
+            foreach (var d in new[] { "Transportation", "Fortification", "Research", "Intervention" })
+                Settings.DivisionShouldRun[d] = true;
+            Settings.DivisionMembers["Transportation"] = new List<string> { "It That Fled", "Gravicius" };
+            Settings.DivisionMembers["Research"] = new List<string> { "Vorici", "Janus" };
+            Settings.DivisionMembers["Fortification"] = new List<string> { "Riker", "Rin" };
+            Settings.DivisionMembers["Intervention"] = new List<string> { "Jorgin", "Hillock" };
+        }
+
         public override void DrawSettings()
         {
             bool showConfiguration = false;
@@ -392,8 +412,14 @@ namespace BetrayalHelper
             ImGui.PopStyleColor();
             ImGui.Separator();
 
+            if (ImGui.Button("Apply recommended 3.30 setup (run all 4, reward members)"))
+                ApplyRecommendedSetup();
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Transportation: It That Fled, Gravicius | Research: Vorici, Janus | Fortification: Riker, Rin | Intervention: Jorgin, Hillock\nAll four divisions run. See docs/STRATEGY_3.30.md");
+            ImGui.Spacing();
+
             int modeIndex = (int)Settings.FarmingMode;
-            ImGui.RadioButton("Safehouse Rewards (5522 classic)", ref modeIndex, 0);
+            ImGui.RadioButton("Safehouse Rewards (placement plan, run what you enable)", ref modeIndex, 0);
             ImGui.SameLine();
             ImGui.RadioButton("Catarina Focus (run ALL safehouses)", ref modeIndex, 1);
             Settings.FarmingMode = (FarmingMode)modeIndex;
@@ -424,7 +450,7 @@ namespace BetrayalHelper
             else
             {
                 ImGui.PushStyleColor(ImGuiCol.Text, new System.Numerics.Vector4(0.7f, 0.7f, 0.7f, 1f));
-                ImGui.TextWrapped("Classic mode: Farm only selected divisions for rewards. Filler divisions block intel to keep board stable.");
+                ImGui.TextWrapped("Placement mode: keep the listed members in their divisions and run every division you enable below (default: all four). Disable Run on a division to block it (fill its intel and do not run it).");
                 ImGui.PopStyleColor();
             }
 
@@ -438,11 +464,9 @@ namespace BetrayalHelper
                     Settings.DivisionShouldRun[div] = Settings.DivisionRoles.TryGetValue(div, out var r) && r == "Farm";
 
                 bool shouldRun = Settings.DivisionShouldRun[div];
-                bool isFillerRole = !(Settings.DivisionRoles.TryGetValue(div, out var runRole) && runRole == "Farm");
-                bool disabled = Settings.FarmingMode == FarmingMode.CatarinaFocus || isFillerRole; // Catarina: always run; Filler: never run
+                bool disabled = Settings.FarmingMode == FarmingMode.CatarinaFocus; // Catarina: always run
 
                 if (disabled) ImGui.BeginDisabled();
-                if (isFillerRole && Settings.FarmingMode != FarmingMode.CatarinaFocus) shouldRun = false;
                 if (ImGui.Checkbox($"Run {div}##run_{div}", ref shouldRun))
                     Settings.DivisionShouldRun[div] = shouldRun;
                 if (disabled) ImGui.EndDisabled();
@@ -886,10 +910,8 @@ namespace BetrayalHelper
             if (Settings.FarmingMode == FarmingMode.CatarinaFocus)
                 return true;
 
-            // Safehouse Rewards: only Farm divisions are ever run; Filler divisions stay untouched
-            // regardless of a stale Run tick. Run/Skip can only turn a Farm division off.
-            if (!IsFarmDivision(division))
-                return false;
+            // 3.30 plan: run everything. The per-division Run setting is authoritative (default: all four);
+            // a missing entry means run.
             return !Settings.DivisionShouldRun.TryGetValue(division, out var shouldRun) || shouldRun;
         }
 

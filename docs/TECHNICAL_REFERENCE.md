@@ -69,8 +69,8 @@ Thresholds used everywhere: `>= 30` good Farm member, `>= 1` filler, `0` outside
 ### 2.2 Run policy (`ShouldRunDivision`)
 
 - `CatarinaFocus`: always run.
-- `SafehouseRewards`: only Farm divisions can run (Filler never); the Run tick can only switch a Farm division off.
-- Run-wanted divisions (`_jobsToGainIntelligence`) get full intel value; others get a small positive value (intel is free, only the safehouse run is skipped).
+- `SafehouseRewards` (3.30 plan, run everything): the per-division Run setting is authoritative, default all four on; a missing entry means run. Disable Run on a division to block it.
+- Run-wanted divisions (`_jobsToGainIntelligence`, default all four) get full intel value; a division with Run off gets a small positive value (intel is free, only the run is skipped). Defaults and rationale: docs/STRATEGY_3.30.md.
 
 ### 2.3 Safehouse ready (`UpdateReadySafehouses`)
 

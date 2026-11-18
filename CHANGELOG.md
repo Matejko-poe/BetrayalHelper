@@ -6,7 +6,11 @@ All notable changes to BetrayalHelper are documented here. The format follows Ke
 
 ## [1.5.0] - 2026-11-18
 
+### Changed (3.30 plan: run everything)
+- Per-division Run setting is authoritative again, default all four on (previous "Filler never runs" lock removed). Defaults: all divisions are placement targets ("Farm" role) with the recommended 3.30 members: Transportation It That Fled + Gravicius, Research Vorici + Janus, Fortification Riker + Rin, Intervention Jorgin + Hillock. New button "Apply recommended 3.30 setup". Source and rationale: docs/STRATEGY_3.30.md (r/pathofexile 3.30 cheatsheet thread).
+
 ### Added
+- `docs/STRATEGY_3.30.md`: 3.30 reward changes, member reward tables, confirmed mechanics, the decision and the recommended default setup.
 - **History and statistics** (`HistoryLogger.cs`, toggle `RecordHistory`): `history/board.jsonl` (every board change with the event it followed), `decisions.jsonl` (every recommendation with all outcome groups), `plan.jsonl` (plan-vs-reality snapshots), `stats.json` (counters). Shown as a row in the System tab. See docs/TECHNICAL_REFERENCE.md 2.10.
 - `docs/TECHNICAL_REFERENCE.md`: data catalog (ID -> source -> code -> System row -> status), all scoring formulas, failure -> repair table, tools and code map.
 - `docs/MEMORY_OFFSETS.md`: every memory offset the plugin uses, with status and the before/after method for finding new ones.

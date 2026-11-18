@@ -81,8 +81,8 @@ namespace BetrayalHelper
         {
             { "Transportation", true },
             { "Fortification",  true },
-            { "Research",       false },
-            { "Intervention",   false }
+            { "Research",       true },
+            { "Intervention",   true }
         };
 
         /// <summary>
@@ -105,18 +105,18 @@ namespace BetrayalHelper
         {
             { "Transportation", "Farm" },
             { "Fortification",  "Farm" },
-            { "Research",       "Filler" },
-            { "Intervention",   "Filler" }
+            { "Research",       "Farm" },
+            { "Intervention",   "Farm" }
         };
 
         // Desired members per division. Ordering has no strategic meaning.
         [IgnoreMenu]
         public Dictionary<string, List<string>> DivisionMembers { get; set; } = new Dictionary<string, List<string>>
         {
-            { "Transportation", new List<string> { "Gravicius", "It That Fled" } },
-            { "Fortification",  new List<string> { "Leo", "Vagan" } },
-            { "Research",       new List<string> { "Janus", "Riker", "Guff", "Aisling", "Haku" } },
-            { "Intervention",   new List<string> { "Cameria", "Elreon", "Tora", "Hillock", "Rin" } }
+            { "Transportation", new List<string> { "It That Fled", "Gravicius" } },
+            { "Fortification",  new List<string> { "Riker", "Rin" } },
+            { "Research",       new List<string> { "Vorici", "Janus" } },
+            { "Intervention",   new List<string> { "Jorgin", "Hillock" } }
         };
 
         public BetrayalHelperSettings()
